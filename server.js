@@ -13,7 +13,7 @@ let players = {};
 
 // Standard: 5 Minuten
 let pingIntervalMs = 5 * 60 * 1000;
-// Zum Testen z. B.:
+// Zum Testen:
 // let pingIntervalMs = 10 * 1000;
 
 let nextPingAt = Date.now() + pingIntervalMs;
@@ -181,9 +181,9 @@ setInterval(() => {
   emitPlayers();
 }, 1000);
 
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT) || 4000;
+const HOST = "0.0.0.0";
 
-httpServer.listen(PORT, () => {
-  console.log(`Server läuft auf Port ${PORT}`);
-});
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Server läuft auf http://${HOST}:${PORT}`);
 });
