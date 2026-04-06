@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { io } from "socket.io-client";
 
 const AdminMap = dynamic(() => import("./AdminMap"), { ssr: false });
-const socket = io("http://192.168.1.112:4000");
+const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL!);
 
 type Player = {
   playerId: string;
