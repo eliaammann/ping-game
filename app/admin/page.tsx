@@ -25,6 +25,8 @@ type Player = {
 };
 
 export default function AdminPage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState("");
   const [players, setPlayers] = useState<Record<string, Player>>({});
   const [nextPingAt, setNextPingAt] = useState<number | null>(null);
   const [seconds, setSeconds] = useState(0);
@@ -124,7 +126,36 @@ export default function AdminPage() {
     const sec = s % 60;
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
+if (!isAuthenticated) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <h1 className="mb-4 text-2xl font-bold">Admin Login</h1>
 
+        <input
+          type="password"
+          placeholder="Passwort"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="mb-4 w-full rounded-lg border border-gray-300 px-4 py-3"
+        />
+
+        <button
+          onClick={() => {
+            if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+              setIsAuthenticated(true);
+            } else {
+              alert("Falsches Passwort");
+            }
+          }}
+          className="w-full rounded-lg bg-gray-800 px-4 py-3 text-white font-semibold"
+        >
+          Login
+        </button>
+      </div>
+    </div>
+  );
+}
   return (
     <div className="relative min-h-screen bg-gray-100 p-6">
       {showPingFlash && (
