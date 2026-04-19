@@ -12,21 +12,28 @@ type Player = {
   socketId: string;
   name: string;
   role: "unassigned" | "agent" | "hunter";
-
   liveLat: number | null;
   liveLng: number | null;
-
   pingLat: number | null;
   pingLng: number | null;
-
   locationStatus: string;
   connected: boolean;
   lastUpdate: number | null;
 };
 
+type CatchState = {
+  reporterId: string;
+  reporterName: string;
+  targetId: string;
+  targetName: string;
+  status: "pending";
+  createdAt: number;
+} | null;
+
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
+
   const [players, setPlayers] = useState<Record<string, Player>>({});
   const [nextPingAt, setNextPingAt] = useState<number | null>(null);
   const [seconds, setSeconds] = useState(0);
@@ -34,6 +41,9 @@ export default function AdminPage() {
 
   const [pingIntervalSeconds, setPingIntervalSeconds] = useState(300);
   const [pingInput, setPingInput] = useState("300");
+
+  const [catchState, setCatchState] = useState<CatchState>(null);
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     socket.on(
@@ -58,10 +68,23 @@ export default function AdminPage() {
       }, 3000);
     });
 
+    socket.on("catchState", (data: CatchState) => {
+      setCatchState(data);
+    });
+
+    socket.on("announcement", (data: { message: string }) => {
+      setAnnouncement(data.message);
+      setTimeout(() => {
+        setAnnouncement("");
+      }, 5000);
+    });
+
     return () => {
       socket.off("playersUpdate");
       socket.off("pingState");
       socket.off("pingTriggered");
+      socket.off("catchState");
+      socket.off("announcement");
     };
   }, []);
 
@@ -126,36 +149,38 @@ export default function AdminPage() {
     const sec = s % 60;
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
-if (!isAuthenticated) {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <h1 className="mb-4 text-2xl font-bold">Admin Login</h1>
 
-        <input
-          type="password"
-          placeholder="Passwort"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="mb-4 w-full rounded-lg border border-gray-300 px-4 py-3"
-        />
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <h1 className="mb-4 text-2xl font-bold">Admin Login</h1>
 
-        <button
-          onClick={() => {
-            if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
-              setIsAuthenticated(true);
-            } else {
-              alert("Falsches Passwort");
-            }
-          }}
-          className="w-full rounded-lg bg-gray-800 px-4 py-3 text-white font-semibold"
-        >
-          Login
-        </button>
+          <input
+            type="password"
+            placeholder="Passwort"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="mb-4 w-full rounded-lg border border-gray-300 px-4 py-3"
+          />
+
+          <button
+            onClick={() => {
+              if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+                setIsAuthenticated(true);
+              } else {
+                alert("Falsches Passwort");
+              }
+            }}
+            className="w-full rounded-lg bg-gray-800 px-4 py-3 text-white font-semibold"
+          >
+            Login
+          </button>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+
   return (
     <div className="relative min-h-screen bg-gray-100 p-6">
       {showPingFlash && (
@@ -163,6 +188,12 @@ if (!isAuthenticated) {
           <div className="rounded-2xl bg-black/75 px-8 py-4 text-3xl font-bold text-white shadow-2xl">
             PING!
           </div>
+        </div>
+      )}
+
+      {announcement && (
+        <div className="absolute left-1/2 top-6 z-[1200] -translate-x-1/2 rounded-xl bg-black/80 px-5 py-3 text-center text-sm font-semibold text-white shadow-xl">
+          {announcement}
         </div>
       )}
 
@@ -206,6 +237,37 @@ if (!isAuthenticated) {
 
       <div className="mb-6 h-[420px] overflow-hidden rounded-2xl shadow">
         <AdminMap players={mapPlayers} />
+      </div>
+
+      <div className="mb-6 rounded-2xl bg-white p-4 shadow">
+        <h2 className="mb-3 text-xl font-bold">Catch Prüfung</h2>
+
+        {!catchState && <div className="text-sm text-gray-600">Keine offene Catch-Meldung.</div>}
+
+        {catchState && (
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="text-sm text-gray-800">
+              <strong>{catchState.reporterName}</strong> meldet Catch gegen{" "}
+              <strong>{catchState.targetName}</strong>.
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => socket.emit("confirmCatch")}
+                className="rounded bg-green-600 px-4 py-2 font-semibold text-white"
+              >
+                Bestätigen
+              </button>
+
+              <button
+                onClick={() => socket.emit("rejectCatch")}
+                className="rounded bg-red-600 px-4 py-2 font-semibold text-white"
+              >
+                Ablehnen
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4">

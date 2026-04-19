@@ -10,12 +10,10 @@ const io = new Server(httpServer, {
 });
 
 let players = {};
+let pendingCatch = null;
 
 // Standard: 5 Minuten
 let pingIntervalMs = 5 * 60 * 1000;
-// Zum Testen:
-// let pingIntervalMs = 10 * 1000;
-
 let nextPingAt = Date.now() + pingIntervalMs;
 
 function emitPlayers() {
@@ -27,6 +25,14 @@ function emitPingState() {
     nextPingAt,
     pingIntervalMs,
   });
+}
+
+function emitCatchState() {
+  io.emit("catchState", pendingCatch);
+}
+
+function emitAnnouncement(message) {
+  io.emit("announcement", { message, at: Date.now() });
 }
 
 function runPing() {
@@ -49,10 +55,16 @@ function runPing() {
   emitPlayers();
 }
 
+function resetGameCycle() {
+  nextPingAt = Date.now() + pingIntervalMs;
+  emitPingState();
+}
+
 io.on("connection", (socket) => {
   console.log("Socket verbunden:", socket.id);
 
   emitPingState();
+  emitCatchState();
 
   socket.on("registerPlayer", (data) => {
     const playerId = data?.playerId;
@@ -79,6 +91,7 @@ io.on("connection", (socket) => {
 
     emitPlayers();
     emitPingState();
+    emitCatchState();
   });
 
   socket.on("updatePosition", (data) => {
@@ -140,6 +153,67 @@ io.on("connection", (socket) => {
     console.log("Neue Pingdauer:", seconds, "Sekunden");
 
     emitPingState();
+  });
+
+  socket.on("reportCatch", (data) => {
+    const reporterId = data?.reporterId;
+    const targetId = data?.targetId;
+
+    if (!reporterId || !targetId) return;
+    if (!players[reporterId] || !players[targetId]) return;
+    if (players[reporterId].role !== "hunter") return;
+    if (players[targetId].role !== "agent") return;
+    if (pendingCatch) return;
+
+    pendingCatch = {
+      reporterId,
+      reporterName: players[reporterId].name,
+      targetId,
+      targetName: players[targetId].name,
+      status: "pending",
+      createdAt: Date.now(),
+    };
+
+    emitCatchState();
+    emitAnnouncement("Catch gemeldet, wird geprüft");
+  });
+
+  socket.on("confirmCatch", () => {
+    if (!pendingCatch) return;
+
+    const { targetId } = pendingCatch;
+
+    if (players[targetId]) {
+      players[targetId] = {
+        ...players[targetId],
+        role: "hunter",
+      };
+    }
+
+    // Spiel neu starten: Ping-Zyklus zurücksetzen und Ping-Positionen leeren
+    Object.keys(players).forEach((playerId) => {
+      players[playerId] = {
+        ...players[playerId],
+        pingLat: null,
+        pingLng: null,
+      };
+    });
+
+    pendingCatch = null;
+
+    emitPlayers();
+    emitCatchState();
+    emitAnnouncement("Catch bestätigt, Rollen werden aktualisiert, Spiel startet neu");
+
+    resetGameCycle();
+  });
+
+  socket.on("rejectCatch", () => {
+    if (!pendingCatch) return;
+
+    pendingCatch = null;
+    emitCatchState();
+    emitAnnouncement("Catch abgelehnt");
   });
 
   socket.on("disconnect", () => {
