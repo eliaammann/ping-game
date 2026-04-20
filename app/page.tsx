@@ -292,22 +292,22 @@ export default function Home() {
     setJoined(true);
   };
 
-const reportCatch = (targetId: string) => {
-  socket.emit(
-    "reportCatch",
-    {
-      reporterId: playerId,
-      targetId,
-    },
-    (response: { ok: boolean; reason: string }) => {
-      alert(
-        `Server-Antwort:\nok=${response.ok}\nreason=${response.reason}`
-      );
-    }
-  );
+  const reportCatch = (targetId: string) => {
+    alert(`Frontend läuft\nreporterId: ${playerId}\ntargetId: ${targetId}`);
 
-  setShowCatchSelect(false);
-};
+    socket.emit(
+      "reportCatch",
+      {
+        reporterId: playerId,
+        targetId,
+      },
+      (response: { ok: boolean; reason: string }) => {
+        alert(`Server-Antwort\nok=${response.ok}\nreason=${response.reason}`);
+      }
+    );
+
+    setShowCatchSelect(false);
+  };
 
   if (!joined) {
     return (

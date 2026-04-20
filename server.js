@@ -55,11 +55,6 @@ function runPing() {
   emitPlayers();
 }
 
-function resetGameCycle() {
-  nextPingAt = Date.now() + pingIntervalMs;
-  emitPingState();
-}
-
 io.on("connection", (socket) => {
   console.log("Socket verbunden:", socket.id);
 
@@ -77,13 +72,10 @@ io.on("connection", (socket) => {
       socketId: socket.id,
       name: data.name || existing.name || "Spieler",
       role: existing.role || "unassigned",
-
       liveLat: existing.liveLat ?? null,
       liveLng: existing.liveLng ?? null,
-
       pingLat: existing.pingLat ?? null,
       pingLng: existing.pingLng ?? null,
-
       locationStatus: existing.locationStatus || "checking",
       connected: true,
       lastUpdate: Date.now(),
@@ -156,48 +148,65 @@ io.on("connection", (socket) => {
   });
 
   socket.on("reportCatch", (data, callback) => {
-  const reporterId = data?.reporterId;
-  const targetId = data?.targetId;
+    const reporterId = data?.reporterId;
+    const targetId = data?.targetId;
 
-  if (!reporterId || !targetId) {
-    if (callback) callback({ ok: false, reason: "reporterId oder targetId fehlt" });
-    return;
-  }
+    console.log("reportCatch erhalten:", {
+      reporterId,
+      targetId,
+      reporterExists: !!players[reporterId],
+      targetExists: !!players[targetId],
+      reporterRole: players[reporterId]?.role,
+      targetRole: players[targetId]?.role,
+      pendingCatch,
+    });
 
-  if (!players[reporterId] || !players[targetId]) {
-    if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
-    return;
-  }
+    if (!reporterId || !targetId) {
+      console.log("Catch abgebrochen: reporterId oder targetId fehlt");
+      if (callback) callback({ ok: false, reason: "reporterId oder targetId fehlt" });
+      return;
+    }
 
-  if (players[reporterId].role !== "hunter") {
-    if (callback) callback({ ok: false, reason: "Reporter ist kein Hunter" });
-    return;
-  }
+    if (!players[reporterId] || !players[targetId]) {
+      console.log("Catch abgebrochen: Spieler nicht gefunden");
+      if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
+      return;
+    }
 
-  if (players[targetId].role !== "agent") {
-    if (callback) callback({ ok: false, reason: "Ziel ist kein Agent" });
-    return;
-  }
+    if (players[reporterId].role !== "hunter") {
+      console.log("Catch abgebrochen: Reporter ist kein Hunter");
+      if (callback) callback({ ok: false, reason: "Reporter ist kein Hunter" });
+      return;
+    }
 
-  if (pendingCatch) {
-    if (callback) callback({ ok: false, reason: "Es gibt bereits einen offenen Catch" });
-    return;
-  }
+    if (players[targetId].role !== "agent") {
+      console.log("Catch abgebrochen: Ziel ist kein Agent");
+      if (callback) callback({ ok: false, reason: "Ziel ist kein Agent" });
+      return;
+    }
 
-  pendingCatch = {
-    reporterId,
-    reporterName: players[reporterId].name,
-    targetId,
-    targetName: players[targetId].name,
-    status: "pending",
-    createdAt: Date.now(),
-  };
+    if (pendingCatch) {
+      console.log("Catch abgebrochen: Es gibt bereits einen offenen Catch");
+      if (callback) callback({ ok: false, reason: "Es gibt bereits einen offenen Catch" });
+      return;
+    }
 
-  emitCatchState();
-  emitAnnouncement("Catch gemeldet, wird geprüft");
+    pendingCatch = {
+      reporterId,
+      reporterName: players[reporterId].name,
+      targetId,
+      targetName: players[targetId].name,
+      status: "pending",
+      createdAt: Date.now(),
+    };
 
-  if (callback) callback({ ok: true, reason: "Catch gespeichert" });
-});
+    console.log("Catch gespeichert:", pendingCatch);
+
+    emitCatchState();
+    emitAnnouncement("Catch gemeldet, wird geprüft");
+
+    if (callback) callback({ ok: true, reason: "Catch gespeichert" });
+  });
 
   socket.on("confirmCatch", () => {
     if (!pendingCatch) return;
@@ -211,7 +220,6 @@ io.on("connection", (socket) => {
       };
     }
 
-    // Spiel neu starten: Ping-Zyklus zurücksetzen und Ping-Positionen leeren
     Object.keys(players).forEach((playerId) => {
       players[playerId] = {
         ...players[playerId],
@@ -226,7 +234,8 @@ io.on("connection", (socket) => {
     emitCatchState();
     emitAnnouncement("Catch bestätigt, Rollen werden aktualisiert, Spiel startet neu");
 
-    resetGameCycle();
+    nextPingAt = Date.now() + pingIntervalMs;
+    emitPingState();
   });
 
   socket.on("rejectCatch", () => {
