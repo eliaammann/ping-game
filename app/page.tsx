@@ -293,8 +293,6 @@ export default function Home() {
   };
 
   const reportCatch = (targetId: string) => {
-    alert(`Frontend läuft\nreporterId: ${playerId}\ntargetId: ${targetId}`);
-
     socket.emit(
       "reportCatch",
       {
@@ -302,7 +300,9 @@ export default function Home() {
         targetId,
       },
       (response: { ok: boolean; reason: string }) => {
-        alert(`Server-Antwort\nok=${response.ok}\nreason=${response.reason}`);
+        if (!response.ok) {
+          alert(response.reason);
+        }
       }
     );
 
