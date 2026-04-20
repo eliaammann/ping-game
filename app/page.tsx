@@ -293,10 +293,7 @@ export default function Home() {
   };
 
 const reportCatch = (targetId: string) => {
-  console.log("Catch Button gedrückt", {
-    reporterId: playerId,
-    targetId,
-  });
+  alert(`reportCatch läuft\nreporterId: ${playerId}\ntargetId: ${targetId}`);
 
   socket.emit("reportCatch", {
     reporterId: playerId,
