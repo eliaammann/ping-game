@@ -292,13 +292,19 @@ export default function Home() {
     setJoined(true);
   };
 
-  const reportCatch = (targetId: string) => {
-    socket.emit("reportCatch", {
-      reporterId: playerId,
-      targetId,
-    });
-    setShowCatchSelect(false);
-  };
+const reportCatch = (targetId: string) => {
+  console.log("Catch Button gedrückt", {
+    reporterId: playerId,
+    targetId,
+  });
+
+  socket.emit("reportCatch", {
+    reporterId: playerId,
+    targetId,
+  });
+
+  setShowCatchSelect(false);
+};
 
   if (!joined) {
     return (
