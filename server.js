@@ -155,42 +155,32 @@ io.on("connection", (socket) => {
     emitPingState();
   });
 
-  socket.on("reportCatch", (data) => {
+  socket.on("reportCatch", (data, callback) => {
   const reporterId = data?.reporterId;
   const targetId = data?.targetId;
 
-  console.log("reportCatch erhalten:", {
-    reporterId,
-    targetId,
-    reporterExists: !!players[reporterId],
-    targetExists: !!players[targetId],
-    reporterRole: players[reporterId]?.role,
-    targetRole: players[targetId]?.role,
-    pendingCatch,
-  });
-
   if (!reporterId || !targetId) {
-    console.log("Catch abgebrochen: reporterId oder targetId fehlt");
+    if (callback) callback({ ok: false, reason: "reporterId oder targetId fehlt" });
     return;
   }
 
   if (!players[reporterId] || !players[targetId]) {
-    console.log("Catch abgebrochen: Spieler nicht gefunden");
+    if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
     return;
   }
 
   if (players[reporterId].role !== "hunter") {
-    console.log("Catch abgebrochen: Reporter ist kein Hunter");
+    if (callback) callback({ ok: false, reason: "Reporter ist kein Hunter" });
     return;
   }
 
   if (players[targetId].role !== "agent") {
-    console.log("Catch abgebrochen: Ziel ist kein Agent");
+    if (callback) callback({ ok: false, reason: "Ziel ist kein Agent" });
     return;
   }
 
   if (pendingCatch) {
-    console.log("Catch abgebrochen: Es gibt bereits einen offenen Catch");
+    if (callback) callback({ ok: false, reason: "Es gibt bereits einen offenen Catch" });
     return;
   }
 
@@ -203,10 +193,10 @@ io.on("connection", (socket) => {
     createdAt: Date.now(),
   };
 
-  console.log("Catch gespeichert:", pendingCatch);
-
   emitCatchState();
   emitAnnouncement("Catch gemeldet, wird geprüft");
+
+  if (callback) callback({ ok: true, reason: "Catch gespeichert" });
 });
 
   socket.on("confirmCatch", () => {

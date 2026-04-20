@@ -293,12 +293,18 @@ export default function Home() {
   };
 
 const reportCatch = (targetId: string) => {
-  alert(`reportCatch läuft\nreporterId: ${playerId}\ntargetId: ${targetId}`);
-
-  socket.emit("reportCatch", {
-    reporterId: playerId,
-    targetId,
-  });
+  socket.emit(
+    "reportCatch",
+    {
+      reporterId: playerId,
+      targetId,
+    },
+    (response: { ok: boolean; reason: string }) => {
+      alert(
+        `Server-Antwort:\nok=${response.ok}\nreason=${response.reason}`
+      );
+    }
+  );
 
   setShowCatchSelect(false);
 };
