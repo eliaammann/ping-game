@@ -79,6 +79,7 @@ export default function Map({
           </Marker>
 
           <InitialCenter position={livePosition} />
+        </>
       )}
 
       {pingPosition && (
