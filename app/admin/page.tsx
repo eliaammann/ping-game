@@ -206,7 +206,7 @@ export default function AdminPage() {
           </div>
 
           <div className="rounded-xl bg-white px-4 py-3 shadow">
-            <div className="mb-2 text-sm font-semibold text-gray-700">
+            <div className="mb-2 text-sm font-semibold text-black">
               Pingdauer ändern
             </div>
 
@@ -219,7 +219,7 @@ export default function AdminPage() {
                 onChange={(e) => setPingInput(e.target.value)}
                 className="w-28 rounded border border-gray-300 px-3 py-2"
               />
-              <span className="text-sm text-gray-600">Sek.</span>
+              <span className="text-sm text-black">Sek.</span>
               <button
                 onClick={applyPingInterval}
                 className="rounded bg-gray-800 px-4 py-2 text-sm font-semibold text-white"
@@ -228,7 +228,7 @@ export default function AdminPage() {
               </button>
             </div>
 
-            <div className="mt-2 text-xs text-gray-500">
+            <div className="mt-2 text-xs text-black">
               Aktuell: {pingIntervalSeconds} Sekunden
             </div>
           </div>
@@ -240,7 +240,7 @@ export default function AdminPage() {
       </div>
 
       <div className="mb-6 rounded-2xl bg-white p-4 shadow">
-        <h2 className="mb-3 text-xl font-bold">Catch Prüfung</h2>
+        <h2 className="mb-3 text-xl font-bold text-black">Catch Prüfung</h2>
 
         {!catchState && <div className="text-sm text-gray-600">Keine offene Catch-Meldung.</div>}
 
@@ -275,7 +275,7 @@ export default function AdminPage() {
           <div key={player.playerId} className="rounded-2xl bg-white p-4 shadow">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-lg font-bold">{player.name}</div>
+                <div className="text-lg font-bold text-black">{player.name}</div>
                 <div className="text-sm text-gray-600">
                   ID: {player.playerId}
                 </div>
