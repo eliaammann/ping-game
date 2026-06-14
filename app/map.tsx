@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, useMap, Tooltip } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polygon, useMap, Tooltip } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -16,10 +16,16 @@ type Player = {
 
   pingLat: number | null;
   pingLng: number | null;
+  heading: number | null;
 
   locationStatus: string;
   connected: boolean;
   lastUpdate: number | null;
+};
+
+type MapPoint = {
+  lat: number;
+  lng: number;
 };
 
 function InitialCenter({ position }: { position: [number, number] }) {
@@ -39,12 +45,34 @@ function InitialCenter({ position }: { position: [number, number] }) {
 export default function Map({
   livePosition,
   pingPosition,
+  ownHeading,
   players,
+  gameArea,
+  meetingPoint,
 }: {
   livePosition: [number, number] | null;
   pingPosition: [number, number] | null;
+  ownHeading: number | null;
   players: Record<string, Player>;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
 }) {
+  const directionIcon = L.divIcon({
+    className: "",
+    html: `<div style="
+      width:0;
+      height:0;
+      border-left:7px solid transparent;
+      border-right:7px solid transparent;
+      border-bottom:20px solid #111827;
+      transform:rotate(${ownHeading ?? 0}deg);
+      transform-origin:50% 70%;
+      filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+    "></div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 14],
+  });
+
   return (
     <MapContainer
       center={[47.3769, 8.5417]}
@@ -55,6 +83,42 @@ export default function Map({
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+
+      {gameArea.length >= 3 && (
+        <Polygon
+          positions={gameArea.map((point) => [point.lat, point.lng])}
+          pathOptions={{
+            color: "#16a34a",
+            fillColor: "#22c55e",
+            fillOpacity: 0.16,
+            weight: 3,
+          }}
+        />
+      )}
+
+      {meetingPoint && (
+        <Marker
+          position={[meetingPoint.lat, meetingPoint.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:26px;
+              height:26px;
+              background:#f59e0b;
+              border-radius:50% 50% 50% 0;
+              border:3px solid white;
+              transform:rotate(-45deg);
+              box-shadow:0 2px 6px rgba(0,0,0,0.35);
+            "></div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 24],
+          })}
+        >
+          <Tooltip permanent direction="top" offset={[0, -22]}>
+            Treffpunkt
+          </Tooltip>
+        </Marker>
+      )}
 
       {livePosition && (
         <>
@@ -77,6 +141,14 @@ export default function Map({
               Du live
             </Tooltip>
           </Marker>
+
+          {ownHeading !== null && (
+            <Marker position={livePosition} icon={directionIcon}>
+              <Tooltip direction="top" offset={[0, -18]}>
+                Deine Blickrichtung
+              </Tooltip>
+            </Marker>
+          )}
 
           <InitialCenter position={livePosition} />
         </>

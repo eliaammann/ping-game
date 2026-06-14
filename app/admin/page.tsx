@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { io } from "socket.io-client";
 
@@ -16,6 +16,7 @@ type Player = {
   liveLng: number | null;
   pingLat: number | null;
   pingLng: number | null;
+  heading: number | null;
   locationStatus: string;
   connected: boolean;
   lastUpdate: number | null;
@@ -29,6 +30,34 @@ type CatchState = {
   status: "pending";
   createdAt: number;
 } | null;
+
+type MapPoint = {
+  lat: number;
+  lng: number;
+};
+
+type AdminPosition = MapPoint & {
+  heading: number | null;
+  updatedAt: number;
+};
+
+type MapState = {
+  adminPosition: AdminPosition | null;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+};
+
+type EditMode = "none" | "meeting" | "area";
+
+type PrivateMessageLog = {
+  id: string;
+  targetId: string;
+  targetName: string;
+  message: string;
+  createdAt: number;
+  reply?: string;
+  replyFrom?: string;
+};
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -44,6 +73,15 @@ export default function AdminPage() {
 
   const [catchState, setCatchState] = useState<CatchState>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [adminPosition, setAdminPosition] = useState<AdminPosition | null>(null);
+  const [gameArea, setGameArea] = useState<MapPoint[]>([]);
+  const [meetingPoint, setMeetingPoint] = useState<MapPoint | null>(null);
+  const [editMode, setEditMode] = useState<EditMode>("none");
+  const [broadcastInput, setBroadcastInput] = useState("");
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [privateInput, setPrivateInput] = useState("");
+  const [privateMessages, setPrivateMessages] = useState<PrivateMessageLog[]>([]);
+  const adminHeadingRef = useRef<number | null>(null);
 
   useEffect(() => {
     socket.on(
@@ -72,6 +110,37 @@ export default function AdminPage() {
       setCatchState(data);
     });
 
+    socket.on("mapState", (data: MapState) => {
+      setAdminPosition(data.adminPosition);
+      setGameArea(data.gameArea || []);
+      setMeetingPoint(data.meetingPoint);
+    });
+
+    socket.on("privateMessageSent", (data: PrivateMessageLog) => {
+      setPrivateMessages((messages) => [data, ...messages].slice(0, 20));
+    });
+
+    socket.on(
+      "privateReply",
+      (data: {
+        messageId: string;
+        playerName: string;
+        reply: string;
+      }) => {
+        setPrivateMessages((messages) =>
+          messages.map((message) =>
+            message.id === data.messageId
+              ? {
+                  ...message,
+                  reply: data.reply,
+                  replyFrom: data.playerName,
+                }
+              : message
+          )
+        );
+      }
+    );
+
     socket.on("announcement", (data: { message: string }) => {
       setAnnouncement(data.message);
       setTimeout(() => {
@@ -84,6 +153,9 @@ export default function AdminPage() {
       socket.off("pingState");
       socket.off("pingTriggered");
       socket.off("catchState");
+      socket.off("mapState");
+      socket.off("privateMessageSent");
+      socket.off("privateReply");
       socket.off("announcement");
     };
   }, []);
@@ -103,8 +175,113 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [nextPingAt]);
 
+  useEffect(() => {
+    if (!isAuthenticated || !navigator.geolocation) return;
+
+    let lastPosition: MapPoint | null = null;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        let nextHeading =
+          Number.isFinite(pos.coords.heading) && pos.coords.heading !== null
+            ? pos.coords.heading
+            : adminHeadingRef.current;
+
+        if (lastPosition && nextHeading === null) {
+          const lat1 = (lastPosition.lat * Math.PI) / 180;
+          const lat2 = (pos.coords.latitude * Math.PI) / 180;
+          const lngDiff = ((pos.coords.longitude - lastPosition.lng) * Math.PI) / 180;
+          const y = Math.sin(lngDiff) * Math.cos(lat2);
+          const x =
+            Math.cos(lat1) * Math.sin(lat2) -
+            Math.sin(lat1) * Math.cos(lat2) * Math.cos(lngDiff);
+          nextHeading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+        }
+
+        lastPosition = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        };
+
+        adminHeadingRef.current = nextHeading;
+        socket.emit("updateAdminPosition", {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          heading: nextHeading,
+        });
+      },
+      () => {},
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 5000,
+      }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isAuthenticated]);
+
   const setRole = (playerId: string, role: "unassigned" | "agent" | "hunter") => {
     socket.emit("setRole", { playerId, role });
+  };
+
+  const kickPlayer = (playerId: string) => {
+    if (!confirm("Diesen Spieler wirklich rauswerfen?")) return;
+    socket.emit("kickPlayer", { playerId });
+  };
+
+  const autoAssignRoles = () => {
+    socket.emit("autoAssignRoles");
+  };
+
+  const addAreaPoint = (point: MapPoint) => {
+    const nextArea = [...gameArea, point];
+    setGameArea(nextArea);
+    socket.emit("setGameArea", { points: nextArea });
+  };
+
+  const setMeetingPointOnMap = (point: MapPoint) => {
+    setMeetingPoint(point);
+    setEditMode("none");
+    socket.emit("setMeetingPoint", point);
+  };
+
+  const clearGameArea = () => {
+    setGameArea([]);
+    socket.emit("setGameArea", { points: [] });
+  };
+
+  const clearMeetingPoint = () => {
+    setMeetingPoint(null);
+    socket.emit("clearMeetingPoint");
+  };
+
+  const sendBroadcastMessage = () => {
+    const message = broadcastInput.trim();
+    if (!message) return;
+
+    socket.emit("sendBroadcastMessage", { message });
+    setBroadcastInput("");
+  };
+
+  const sendPrivateMessage = () => {
+    const message = privateInput.trim();
+    if (!selectedPlayerId || !message) return;
+
+    socket.emit(
+      "sendPrivateMessage",
+      {
+        targetId: selectedPlayerId,
+        message,
+      },
+      (response: { ok: boolean; reason?: string }) => {
+        if (!response.ok) {
+          alert(response.reason || "Nachricht konnte nicht gesendet werden.");
+        }
+      }
+    );
+
+    setPrivateInput("");
   };
 
   const applyPingInterval = () => {
@@ -143,6 +320,11 @@ export default function AdminPage() {
       )
     );
   }, [players]);
+
+  const selectedPlayer = useMemo(() => {
+    if (!selectedPlayerId) return null;
+    return players[selectedPlayerId] || null;
+  }, [players, selectedPlayerId]);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -235,8 +417,94 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <div className="mb-6 h-[420px] overflow-hidden rounded-2xl shadow">
-        <AdminMap players={mapPlayers} />
+      <div className="mb-6 grid gap-4 lg:grid-cols-[220px_1fr]">
+        <div className="rounded-2xl bg-white p-4 shadow">
+          <h2 className="mb-3 text-xl font-bold text-black">Spielsteuerung</h2>
+          <button
+            onClick={autoAssignRoles}
+            className="w-full rounded bg-indigo-700 px-4 py-3 font-semibold text-white"
+          >
+            Auto Zuordnung
+          </button>
+          <div className="mt-2 text-sm text-gray-700">
+            Ein Spieler wird Agent, alle anderen werden Hunter.
+          </div>
+        </div>
+
+        <div className="rounded-2xl bg-white p-4 shadow">
+          <h2 className="mb-3 text-xl font-bold text-black">Nachricht an alle</h2>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              value={broadcastInput}
+              onChange={(event) => setBroadcastInput(event.target.value)}
+              placeholder="Nachricht schreiben"
+              className="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-black"
+            />
+            <button
+              onClick={sendBroadcastMessage}
+              className="rounded bg-gray-800 px-4 py-2 font-semibold text-white"
+            >
+              Senden
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-2xl bg-white p-4 shadow">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-black">Karte</h2>
+            <div className="text-sm text-gray-700">
+              {editMode === "meeting" && "Klicke auf die Karte, um den Treffpunkt zu setzen."}
+              {editMode === "area" && "Klicke mehrere Punkte auf der Karte, um den Spielbereich zu zeichnen."}
+              {editMode === "none" && "Spielbereich, Treffpunkt und Adminposition werden hier angezeigt."}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setEditMode(editMode === "meeting" ? "none" : "meeting")}
+              className={`rounded px-3 py-2 text-sm font-semibold text-white ${
+                editMode === "meeting" ? "bg-amber-600" : "bg-gray-800"
+              }`}
+            >
+              Treffpunkt setzen
+            </button>
+            <button
+              onClick={() => setEditMode(editMode === "area" ? "none" : "area")}
+              className={`rounded px-3 py-2 text-sm font-semibold text-white ${
+                editMode === "area" ? "bg-green-700" : "bg-gray-800"
+              }`}
+            >
+              Spielbereich zeichnen
+            </button>
+            <button
+              onClick={clearMeetingPoint}
+              className="rounded bg-gray-600 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Treffpunkt löschen
+            </button>
+            <button
+              onClick={clearGameArea}
+              className="rounded bg-gray-600 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Spielbereich löschen
+            </button>
+          </div>
+        </div>
+
+        <div className="h-[420px] overflow-hidden rounded-xl shadow">
+          <AdminMap
+            players={mapPlayers}
+            adminPosition={adminPosition}
+            gameArea={gameArea}
+            meetingPoint={meetingPoint}
+            editMode={editMode}
+            onMeetingPoint={setMeetingPointOnMap}
+            onAreaPoint={addAreaPoint}
+          />
+        </div>
       </div>
 
       <div className="mb-6 rounded-2xl bg-white p-4 shadow">
@@ -270,9 +538,65 @@ export default function AdminPage() {
         )}
       </div>
 
+      <div className="mb-6 rounded-2xl bg-white p-4 shadow">
+        <h2 className="mb-3 text-xl font-bold text-black">Private Nachricht</h2>
+
+        {!selectedPlayer && (
+          <div className="text-sm text-gray-700">
+            Wähle einen Spieler aus der Liste aus, um ihm direkt zu schreiben.
+          </div>
+        )}
+
+        {selectedPlayer && (
+          <div className="grid gap-3">
+            <div className="text-sm text-gray-800">
+              Ausgewählt: <strong>{selectedPlayer.name}</strong>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={privateInput}
+                onChange={(event) => setPrivateInput(event.target.value)}
+                placeholder="Private Nachricht schreiben"
+                className="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-black"
+              />
+              <button
+                onClick={sendPrivateMessage}
+                className="rounded bg-indigo-700 px-4 py-2 font-semibold text-white"
+              >
+                Senden
+              </button>
+            </div>
+          </div>
+        )}
+
+        {privateMessages.length > 0 && (
+          <div className="mt-4 grid gap-2">
+            {privateMessages.map((message) => (
+              <div key={message.id} className="rounded border border-gray-200 p-3 text-sm text-gray-800">
+                <div>
+                  An <strong>{message.targetName}</strong>: {message.message}
+                </div>
+                {message.reply && (
+                  <div className="mt-1 rounded bg-green-50 p-2 text-green-900">
+                    Antwort von {message.replyFrom}: {message.reply}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-4">
         {Object.values(players).map((player) => (
-          <div key={player.playerId} className="rounded-2xl bg-white p-4 shadow">
+          <div
+            key={player.playerId}
+            onClick={() => setSelectedPlayerId(player.playerId)}
+            className={`cursor-pointer rounded-2xl bg-white p-4 shadow ${
+              selectedPlayerId === player.playerId ? "ring-4 ring-indigo-500" : ""
+            }`}
+          >
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="text-lg font-bold text-black">{player.name}</div>
@@ -323,24 +647,43 @@ export default function AdminPage() {
 
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setRole(player.playerId, "unassigned")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setRole(player.playerId, "unassigned");
+                }}
                 className="rounded bg-gray-600 px-3 py-2 text-sm font-semibold text-white"
               >
                 Unassigned
               </button>
 
               <button
-                onClick={() => setRole(player.playerId, "agent")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setRole(player.playerId, "agent");
+                }}
                 className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white"
               >
                 Agent
               </button>
 
               <button
-                onClick={() => setRole(player.playerId, "hunter")}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setRole(player.playerId, "hunter");
+                }}
                 className="rounded bg-red-600 px-3 py-2 text-sm font-semibold text-white"
               >
                 Hunter
+              </button>
+
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  kickPlayer(player.playerId);
+                }}
+                className="rounded bg-black px-3 py-2 text-sm font-semibold text-white"
+              >
+                Rauswerfen
               </button>
             </div>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { io } from "socket.io-client";
 
@@ -16,6 +16,7 @@ type Player = {
   liveLng: number | null;
   pingLat: number | null;
   pingLng: number | null;
+  heading: number | null;
   locationStatus: string;
   connected: boolean;
   lastUpdate: number | null;
@@ -40,6 +41,22 @@ type LocationStatus =
   | "error"
   | "stale";
 
+type MapPoint = {
+  lat: number;
+  lng: number;
+};
+
+type MapState = {
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+};
+
+type PrivateMessage = {
+  id: string;
+  message: string;
+  createdAt: number;
+};
+
 function generatePlayerId() {
   return "player-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
@@ -52,8 +69,11 @@ export default function Home() {
 
   const [livePosition, setLivePosition] = useState<[number, number] | null>(null);
   const [pingPosition, setPingPosition] = useState<[number, number] | null>(null);
+  const [ownHeading, setOwnHeading] = useState<number | null>(null);
   const [players, setPlayers] = useState<Record<string, Player>>({});
   const [seconds, setSeconds] = useState(0);
+  const lastPositionRef = useRef<MapPoint | null>(null);
+  const headingRef = useRef<number | null>(null);
 
   const [locationStatus, setLocationStatus] =
     useState<LocationStatus>("checking");
@@ -65,6 +85,11 @@ export default function Home() {
   const [catchState, setCatchState] = useState<CatchState>(null);
   const [announcement, setAnnouncement] = useState("");
   const [showCatchSelect, setShowCatchSelect] = useState(false);
+  const [gameArea, setGameArea] = useState<MapPoint[]>([]);
+  const [meetingPoint, setMeetingPoint] = useState<MapPoint | null>(null);
+  const [privateMessage, setPrivateMessage] = useState<PrivateMessage | null>(null);
+  const [privateReply, setPrivateReply] = useState("");
+  const [kicked, setKicked] = useState(false);
 
   useEffect(() => {
     const savedPlayerId = localStorage.getItem("playerId");
@@ -122,6 +147,29 @@ export default function Home() {
       setCatchState(data);
     });
 
+    socket.on("mapState", (data: MapState) => {
+      setGameArea(data.gameArea || []);
+      setMeetingPoint(data.meetingPoint);
+    });
+
+    socket.on("adminMessage", (data: PrivateMessage) => {
+      setAnnouncement(data.message);
+      setTimeout(() => {
+        setAnnouncement("");
+      }, 8000);
+    });
+
+    socket.on("privateMessage", (data: PrivateMessage) => {
+      setPrivateMessage(data);
+      setPrivateReply("");
+    });
+
+    socket.on("kicked", () => {
+      localStorage.removeItem("playerName");
+      setJoined(false);
+      setKicked(true);
+    });
+
     socket.on("announcement", (data: { message: string }) => {
       setAnnouncement(data.message);
       setTimeout(() => {
@@ -134,6 +182,10 @@ export default function Home() {
       socket.off("pingState");
       socket.off("pingTriggered");
       socket.off("catchState");
+      socket.off("mapState");
+      socket.off("adminMessage");
+      socket.off("privateMessage");
+      socket.off("kicked");
       socket.off("announcement");
     };
   }, [playerId]);
@@ -152,6 +204,26 @@ export default function Home() {
 
     return () => clearInterval(interval);
   }, [nextPingAt]);
+
+  useEffect(() => {
+    const handleOrientation = (event: DeviceOrientationEvent) => {
+      const heading =
+        typeof event.alpha === "number" ? (360 - event.alpha + 360) % 360 : null;
+
+      if (heading !== null) {
+        headingRef.current = heading;
+        setOwnHeading(heading);
+      }
+    };
+
+    window.addEventListener("deviceorientationabsolute", handleOrientation);
+    window.addEventListener("deviceorientation", handleOrientation);
+
+    return () => {
+      window.removeEventListener("deviceorientationabsolute", handleOrientation);
+      window.removeEventListener("deviceorientation", handleOrientation);
+    };
+  }, []);
 
   useEffect(() => {
     if (!joined || !playerId) return;
@@ -175,6 +247,32 @@ export default function Home() {
           pos.coords.latitude,
           pos.coords.longitude,
         ];
+        let nextHeading =
+          Number.isFinite(pos.coords.heading) && pos.coords.heading !== null
+            ? pos.coords.heading
+            : headingRef.current;
+
+        if (lastPositionRef.current && nextHeading === null) {
+          const lat1 = (lastPositionRef.current.lat * Math.PI) / 180;
+          const lat2 = (pos.coords.latitude * Math.PI) / 180;
+          const lngDiff =
+            ((pos.coords.longitude - lastPositionRef.current.lng) * Math.PI) / 180;
+          const y = Math.sin(lngDiff) * Math.cos(lat2);
+          const x =
+            Math.cos(lat1) * Math.sin(lat2) -
+            Math.sin(lat1) * Math.cos(lat2) * Math.cos(lngDiff);
+          nextHeading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+        }
+
+        lastPositionRef.current = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        };
+
+        if (nextHeading !== null) {
+          headingRef.current = nextHeading;
+          setOwnHeading(nextHeading);
+        }
 
         setLivePosition(newPosition);
         setLocationStatus("active");
@@ -186,6 +284,7 @@ export default function Home() {
           playerId,
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
+          heading: nextHeading,
           locationStatus: "active",
         });
       },
@@ -309,11 +408,30 @@ export default function Home() {
     setShowCatchSelect(false);
   };
 
+  const sendPrivateReply = () => {
+    const reply = privateReply.trim();
+    if (!privateMessage || !reply) return;
+
+    socket.emit("sendPrivateReply", {
+      playerId,
+      messageId: privateMessage.id,
+      reply,
+    });
+
+    setPrivateMessage(null);
+    setPrivateReply("");
+  };
+
   if (!joined) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
           <h1 className="mb-4 text-2xl font-bold">Spiel beitreten</h1>
+          {kicked && (
+            <div className="mb-4 rounded-lg bg-red-100 px-4 py-3 text-sm font-semibold text-red-800">
+              Du wurdest aus dem Spiel entfernt.
+            </div>
+          )}
           <p className="mb-4 text-sm text-gray-600">
             Gib deinen Namen ein. Deine Rolle wird später im Adminbereich zugewiesen.
           </p>
@@ -384,6 +502,35 @@ export default function Home() {
         </div>
       )}
 
+      {privateMessage && (
+        <div className="absolute inset-x-4 top-32 z-[1250] mx-auto max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+          <h2 className="mb-2 text-lg font-bold text-black">Nachricht vom Admin</h2>
+          <div className="mb-4 rounded bg-gray-100 p-3 text-sm text-gray-900">
+            {privateMessage.message}
+          </div>
+          <textarea
+            value={privateReply}
+            onChange={(event) => setPrivateReply(event.target.value)}
+            placeholder="Antwort schreiben"
+            className="mb-3 min-h-24 w-full rounded border border-gray-300 px-3 py-2 text-black"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={sendPrivateReply}
+              className="flex-1 rounded bg-indigo-700 px-4 py-2 font-semibold text-white"
+            >
+              Antwort senden
+            </button>
+            <button
+              onClick={() => setPrivateMessage(null)}
+              className="rounded bg-gray-600 px-4 py-2 font-semibold text-white"
+            >
+              Schließen
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-gray-800 p-4 text-center text-xl font-bold text-white">
         Nächster Ping in: {formatTime(seconds)}
       </div>
@@ -413,7 +560,10 @@ export default function Home() {
         <Map
           livePosition={livePosition}
           pingPosition={pingPosition}
+          ownHeading={ownHeading}
           players={otherPlayers}
+          gameArea={gameArea}
+          meetingPoint={meetingPoint}
         />
       </div>
 

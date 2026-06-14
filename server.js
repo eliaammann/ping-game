@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 
@@ -11,6 +12,9 @@ const io = new Server(httpServer, {
 
 let players = {};
 let pendingCatch = null;
+let adminPosition = null;
+let gameArea = [];
+let meetingPoint = null;
 
 // Standard: 5 Minuten
 let pingIntervalMs = 5 * 60 * 1000;
@@ -29,6 +33,22 @@ function emitPingState() {
 
 function emitCatchState() {
   io.emit("catchState", pendingCatch);
+}
+
+function emitMapState() {
+  io.emit("mapState", {
+    adminPosition,
+    gameArea,
+    meetingPoint,
+  });
+}
+
+function emitAdminMessage(message) {
+  io.emit("adminMessage", {
+    id: "broadcast-" + Date.now(),
+    message,
+    createdAt: Date.now(),
+  });
 }
 
 function emitAnnouncement(message) {
@@ -60,6 +80,7 @@ io.on("connection", (socket) => {
 
   emitPingState();
   emitCatchState();
+  emitMapState();
 
   socket.on("registerPlayer", (data) => {
     const playerId = data?.playerId;
@@ -76,6 +97,7 @@ io.on("connection", (socket) => {
       liveLng: existing.liveLng ?? null,
       pingLat: existing.pingLat ?? null,
       pingLng: existing.pingLng ?? null,
+      heading: existing.heading ?? null,
       locationStatus: existing.locationStatus || "checking",
       connected: true,
       lastUpdate: Date.now(),
@@ -84,6 +106,7 @@ io.on("connection", (socket) => {
     emitPlayers();
     emitPingState();
     emitCatchState();
+    emitMapState();
   });
 
   socket.on("updatePosition", (data) => {
@@ -95,6 +118,9 @@ io.on("connection", (socket) => {
       socketId: socket.id,
       liveLat: data.lat,
       liveLng: data.lng,
+      heading: Number.isFinite(Number(data.heading))
+        ? Number(data.heading)
+        : players[playerId].heading ?? null,
       locationStatus: data.locationStatus || "active",
       connected: true,
       lastUpdate: Date.now(),
@@ -131,6 +157,144 @@ io.on("connection", (socket) => {
     };
 
     emitPlayers();
+  });
+
+  socket.on("kickPlayer", (data) => {
+    const playerId = data?.playerId;
+    if (!playerId || !players[playerId]) return;
+
+    const kickedSocketId = players[playerId].socketId;
+    if (kickedSocketId) {
+      io.to(kickedSocketId).emit("kicked");
+    }
+
+    delete players[playerId];
+
+    if (pendingCatch?.reporterId === playerId || pendingCatch?.targetId === playerId) {
+      pendingCatch = null;
+      emitCatchState();
+    }
+
+    emitPlayers();
+    emitAnnouncement("Ein Spieler wurde entfernt");
+  });
+
+  socket.on("autoAssignRoles", () => {
+    const playerIds = Object.keys(players);
+    if (playerIds.length === 0) return;
+
+    const agentId = playerIds[Math.floor(Math.random() * playerIds.length)];
+
+    playerIds.forEach((playerId) => {
+      players[playerId] = {
+        ...players[playerId],
+        role: playerId === agentId ? "agent" : "hunter",
+      };
+    });
+
+    emitPlayers();
+    emitAnnouncement("Rollen wurden automatisch zugeordnet");
+  });
+
+  socket.on("updateAdminPosition", (data) => {
+    const lat = Number(data?.lat);
+    const lng = Number(data?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    adminPosition = {
+      lat,
+      lng,
+      heading: Number.isFinite(Number(data?.heading)) ? Number(data.heading) : null,
+      updatedAt: Date.now(),
+    };
+
+    emitMapState();
+  });
+
+  socket.on("setGameArea", (data) => {
+    if (!Array.isArray(data?.points)) return;
+
+    gameArea = data.points
+      .map((point) => ({
+        lat: Number(point?.lat),
+        lng: Number(point?.lng),
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+      .slice(0, 30);
+
+    emitMapState();
+    emitAnnouncement(gameArea.length > 0 ? "Spielbereich aktualisiert" : "Spielbereich gelöscht");
+  });
+
+  socket.on("setMeetingPoint", (data) => {
+    const lat = Number(data?.lat);
+    const lng = Number(data?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    meetingPoint = {
+      lat,
+      lng,
+      updatedAt: Date.now(),
+    };
+
+    emitMapState();
+    emitAnnouncement("Treffpunkt gesetzt");
+  });
+
+  socket.on("clearMeetingPoint", () => {
+    meetingPoint = null;
+    emitMapState();
+    emitAnnouncement("Treffpunkt gelöscht");
+  });
+
+  socket.on("sendBroadcastMessage", (data) => {
+    const message = String(data?.message || "").trim();
+    if (!message) return;
+
+    emitAdminMessage(message);
+    emitAnnouncement(message);
+  });
+
+  socket.on("sendPrivateMessage", (data, callback) => {
+    const targetId = data?.targetId;
+    const message = String(data?.message || "").trim();
+
+    if (!targetId || !players[targetId] || !message) {
+      if (callback) callback({ ok: false, reason: "Spieler oder Nachricht fehlt" });
+      return;
+    }
+
+    const privateMessage = {
+      id: "private-" + Date.now(),
+      targetId,
+      targetName: players[targetId].name,
+      message,
+      createdAt: Date.now(),
+    };
+
+    io.to(players[targetId].socketId).emit("privateMessage", privateMessage);
+    io.emit("privateMessageSent", privateMessage);
+
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("sendPrivateReply", (data) => {
+    const playerId = data?.playerId;
+    const messageId = data?.messageId;
+    const reply = String(data?.reply || "").trim();
+
+    if (!playerId || !players[playerId] || !messageId || !reply) return;
+
+    io.emit("privateReply", {
+      id: "reply-" + Date.now(),
+      messageId,
+      playerId,
+      playerName: players[playerId].name,
+      reply,
+      createdAt: Date.now(),
+    });
   });
 
   socket.on("setPingInterval", (data) => {

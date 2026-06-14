@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Tooltip, useMap } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Polygon,
+  Tooltip,
+  useMap,
+  useMapEvents,
+} from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -16,11 +24,24 @@ type Player = {
 
   pingLat: number | null;
   pingLng: number | null;
+  heading: number | null;
 
   locationStatus: string;
   connected: boolean;
   lastUpdate: number | null;
 };
+
+type MapPoint = {
+  lat: number;
+  lng: number;
+};
+
+type AdminPosition = MapPoint & {
+  heading: number | null;
+  updatedAt: number;
+};
+
+type EditMode = "none" | "meeting" | "area";
 
 function InitialFitToPlayers({ players }: { players: Record<string, Player> }) {
   const map = useMap();
@@ -55,10 +76,51 @@ function InitialFitToPlayers({ players }: { players: Record<string, Player> }) {
   return null;
 }
 
+function MapClickHandler({
+  editMode,
+  onMeetingPoint,
+  onAreaPoint,
+}: {
+  editMode: EditMode;
+  onMeetingPoint: (point: MapPoint) => void;
+  onAreaPoint: (point: MapPoint) => void;
+}) {
+  useMapEvents({
+    click(event) {
+      const point = {
+        lat: event.latlng.lat,
+        lng: event.latlng.lng,
+      };
+
+      if (editMode === "meeting") {
+        onMeetingPoint(point);
+      }
+
+      if (editMode === "area") {
+        onAreaPoint(point);
+      }
+    },
+  });
+
+  return null;
+}
+
 export default function AdminMap({
   players,
+  adminPosition,
+  gameArea,
+  meetingPoint,
+  editMode,
+  onMeetingPoint,
+  onAreaPoint,
 }: {
   players: Record<string, Player>;
+  adminPosition: AdminPosition | null;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+  editMode: EditMode;
+  onMeetingPoint: (point: MapPoint) => void;
+  onAreaPoint: (point: MapPoint) => void;
 }) {
   return (
     <MapContainer
@@ -72,6 +134,116 @@ export default function AdminMap({
       />
 
       <InitialFitToPlayers players={players} />
+      <MapClickHandler
+        editMode={editMode}
+        onMeetingPoint={onMeetingPoint}
+        onAreaPoint={onAreaPoint}
+      />
+
+      {gameArea.length >= 3 && (
+        <Polygon
+          positions={gameArea.map((point) => [point.lat, point.lng])}
+          pathOptions={{
+            color: "#16a34a",
+            fillColor: "#22c55e",
+            fillOpacity: 0.16,
+            weight: 3,
+          }}
+        />
+      )}
+
+      {gameArea.length > 0 &&
+        gameArea.map((point, index) => (
+          <Marker
+            key={`${point.lat}-${point.lng}-${index}`}
+            position={[point.lat, point.lng]}
+            icon={L.divIcon({
+              className: "",
+              html: `<div style="
+                width:16px;
+                height:16px;
+                background:#16a34a;
+                border-radius:50%;
+                border:2px solid white;
+                box-shadow:0 1px 4px rgba(0,0,0,0.35);
+              "></div>`,
+              iconSize: [16, 16],
+              iconAnchor: [8, 8],
+            })}
+          >
+            <Tooltip permanent direction="top" offset={[0, -10]}>
+              Punkt {index + 1}
+            </Tooltip>
+          </Marker>
+        ))}
+
+      {meetingPoint && (
+        <Marker
+          position={[meetingPoint.lat, meetingPoint.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:26px;
+              height:26px;
+              background:#f59e0b;
+              border-radius:50% 50% 50% 0;
+              border:3px solid white;
+              transform:rotate(-45deg);
+              box-shadow:0 2px 6px rgba(0,0,0,0.35);
+            "></div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 24],
+          })}
+        >
+          <Tooltip permanent direction="top" offset={[0, -22]}>
+            Treffpunkt
+          </Tooltip>
+        </Marker>
+      )}
+
+      {adminPosition && (
+        <Marker
+          position={[adminPosition.lat, adminPosition.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:20px;
+              height:20px;
+              background:#111827;
+              border-radius:50%;
+              border:3px solid #facc15;
+              box-shadow:0 2px 6px rgba(0,0,0,0.35);
+            "></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10],
+          })}
+        >
+          <Tooltip permanent direction="top" offset={[0, -12]}>
+            Admin
+          </Tooltip>
+        </Marker>
+      )}
+
+      {adminPosition?.heading !== null && adminPosition && (
+        <Marker
+          position={[adminPosition.lat, adminPosition.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:0;
+              height:0;
+              border-left:7px solid transparent;
+              border-right:7px solid transparent;
+              border-bottom:20px solid #facc15;
+              transform:rotate(${adminPosition.heading}deg);
+              transform-origin:50% 70%;
+              filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+            "></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 14],
+          })}
+        />
+      )}
 
       {Object.values(players)
         .filter((player) => player.liveLat !== null && player.liveLng !== null)
