@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -21,25 +22,35 @@ type Player = {
   lastUpdate: number | null;
 };
 
-function FitToPlayers({ players }: { players: Record<string, Player> }) {
+function InitialFitToPlayers({ players }: { players: Record<string, Player> }) {
   const map = useMap();
+  const hasCentered = useRef(false);
 
-  const validPlayers = Object.values(players).filter(
-    (player) => player.liveLat !== null && player.liveLng !== null
-  );
+  useEffect(() => {
+    if (hasCentered.current) return;
 
-  if (validPlayers.length === 1) {
-    map.setView([validPlayers[0].liveLat!, validPlayers[0].liveLng!], 16);
-  }
-
-  if (validPlayers.length > 1) {
-    const bounds = L.latLngBounds(
-      validPlayers.map(
-        (player) => [player.liveLat!, player.liveLng!] as [number, number]
-      )
+    const validPlayers = Object.values(players).filter(
+      (player) => player.liveLat !== null && player.liveLng !== null
     );
-    map.fitBounds(bounds, { padding: [40, 40] });
-  }
+
+    if (validPlayers.length === 0) return;
+
+    if (validPlayers.length === 1) {
+      map.setView([validPlayers[0].liveLat!, validPlayers[0].liveLng!], 16);
+    }
+
+    if (validPlayers.length > 1) {
+      const bounds = L.latLngBounds(
+        validPlayers.map(
+          (player) => [player.liveLat!, player.liveLng!] as [number, number]
+        )
+      );
+
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+
+    hasCentered.current = true;
+  }, [map, players]);
 
   return null;
 }
@@ -60,7 +71,7 @@ export default function AdminMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <FitToPlayers players={players} />
+      <InitialFitToPlayers players={players} />
 
       {Object.values(players)
         .filter((player) => player.liveLat !== null && player.liveLng !== null)

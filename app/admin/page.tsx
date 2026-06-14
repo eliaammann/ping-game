@@ -152,7 +152,7 @@ export default function AdminPage() {
 
   if (!isAuthenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
+      <div className="flex min-h-screen items-center justify-center bg-gray-800 p-6">
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
           <h1 className="mb-4 text-2xl font-bold">Admin Login</h1>
 
@@ -182,7 +182,7 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="relative min-h-screen bg-gray-100 p-6">
+    <div className="relative min-h-screen bg-gray-800 p-6">
       {showPingFlash && (
         <div className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center bg-white/20">
           <div className="rounded-2xl bg-black/75 px-8 py-4 text-3xl font-bold text-white shadow-2xl">

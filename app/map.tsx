@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, useMap, Tooltip } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -21,9 +22,17 @@ type Player = {
   lastUpdate: number | null;
 };
 
-function Recenter({ position }: { position: [number, number] }) {
+function InitialCenter({ position }: { position: [number, number] }) {
   const map = useMap();
-  map.setView(position, 16);
+  const hasCentered = useRef(false);
+
+  useEffect(() => {
+    if (hasCentered.current) return;
+
+    map.setView(position, 16);
+    hasCentered.current = true;
+  }, [map, position]);
+
   return null;
 }
 
@@ -69,8 +78,7 @@ export default function Map({
             </Tooltip>
           </Marker>
 
-          <Recenter position={livePosition} />
-        </>
+          <InitialCenter position={livePosition} />
       )}
 
       {pingPosition && (
