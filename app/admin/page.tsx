@@ -458,7 +458,7 @@ export default function AdminPage() {
                 max={3600}
                 value={pingInput}
                 onChange={(e) => setPingInput(e.target.value)}
-                className="w-28 rounded border border-gray-300 px-3 py-2"
+                className="w-28 rounded border border-gray-300 px-3 py-2 text-black placeholder:text-gray-600"
               />
               <span className="text-sm text-black">Sek.</span>
               <button

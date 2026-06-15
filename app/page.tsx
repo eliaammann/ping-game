@@ -438,13 +438,13 @@ export default function Home() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-          <h1 className="mb-4 text-2xl font-bold">Spiel beitreten</h1>
+          <h1 className="mb-4 text-2xl font-bold text-black">Spiel beitreten</h1>
           {kicked && (
             <div className="mb-4 rounded-lg bg-red-100 px-4 py-3 text-sm font-semibold text-red-800">
               Du wurdest aus dem Spiel entfernt.
             </div>
           )}
-          <p className="mb-4 text-sm text-gray-600">
+          <p className="mb-4 text-sm text-gray-800">
             Gib deinen Namen ein. Deine Rolle wird später im Adminbereich zugewiesen.
           </p>
 
@@ -453,7 +453,7 @@ export default function Home() {
             value={tempName}
             onChange={(e) => setTempName(e.target.value)}
             placeholder="Dein Name"
-            className="mb-4 w-full rounded-lg border border-gray-300 px-4 py-3 outline-none"
+            className="mb-4 w-full rounded-lg border border-gray-300 px-4 py-3 text-black outline-none placeholder:text-gray-600"
           />
 
           <button
