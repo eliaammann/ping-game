@@ -82,6 +82,14 @@ io.on("connection", (socket) => {
   emitCatchState();
   emitMapState();
 
+  socket.on("requestState", (callback) => {
+    emitPlayers();
+    emitPingState();
+    emitCatchState();
+    emitMapState();
+    if (callback) callback({ ok: true });
+  });
+
   socket.on("registerPlayer", (data) => {
     const playerId = data?.playerId;
     if (!playerId) return;
@@ -159,9 +167,12 @@ io.on("connection", (socket) => {
     emitPlayers();
   });
 
-  socket.on("kickPlayer", (data) => {
+  socket.on("kickPlayer", (data, callback) => {
     const playerId = data?.playerId;
-    if (!playerId || !players[playerId]) return;
+    if (!playerId || !players[playerId]) {
+      if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
+      return;
+    }
 
     const kickedSocketId = players[playerId].socketId;
     if (kickedSocketId) {
@@ -177,11 +188,15 @@ io.on("connection", (socket) => {
 
     emitPlayers();
     emitAnnouncement("Ein Spieler wurde entfernt");
+    if (callback) callback({ ok: true });
   });
 
-  socket.on("autoAssignRoles", () => {
+  socket.on("autoAssignRoles", (callback) => {
     const playerIds = Object.keys(players);
-    if (playerIds.length === 0) return;
+    if (playerIds.length === 0) {
+      if (callback) callback({ ok: false, reason: "Keine Spieler vorhanden" });
+      return;
+    }
 
     const agentId = playerIds[Math.floor(Math.random() * playerIds.length)];
 
@@ -194,6 +209,7 @@ io.on("connection", (socket) => {
 
     emitPlayers();
     emitAnnouncement("Rollen wurden automatisch zugeordnet");
+    if (callback) callback({ ok: true, agentId });
   });
 
   socket.on("updateAdminPosition", (data) => {
@@ -212,8 +228,11 @@ io.on("connection", (socket) => {
     emitMapState();
   });
 
-  socket.on("setGameArea", (data) => {
-    if (!Array.isArray(data?.points)) return;
+  socket.on("setGameArea", (data, callback) => {
+    if (!Array.isArray(data?.points)) {
+      if (callback) callback({ ok: false, reason: "Spielbereich fehlt" });
+      return;
+    }
 
     gameArea = data.points
       .map((point) => ({
@@ -224,14 +243,18 @@ io.on("connection", (socket) => {
       .slice(0, 30);
 
     emitMapState();
-    emitAnnouncement(gameArea.length > 0 ? "Spielbereich aktualisiert" : "Spielbereich gelöscht");
+    emitAnnouncement(gameArea.length > 0 ? "Spielbereich aktualisiert" : "Spielbereich geloescht");
+    if (callback) callback({ ok: true });
   });
 
-  socket.on("setMeetingPoint", (data) => {
+  socket.on("setMeetingPoint", (data, callback) => {
     const lat = Number(data?.lat);
     const lng = Number(data?.lng);
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      if (callback) callback({ ok: false, reason: "Treffpunkt fehlt" });
+      return;
+    }
 
     meetingPoint = {
       lat,
@@ -241,20 +264,26 @@ io.on("connection", (socket) => {
 
     emitMapState();
     emitAnnouncement("Treffpunkt gesetzt");
+    if (callback) callback({ ok: true });
   });
 
-  socket.on("clearMeetingPoint", () => {
+  socket.on("clearMeetingPoint", (callback) => {
     meetingPoint = null;
     emitMapState();
-    emitAnnouncement("Treffpunkt gelöscht");
+    emitAnnouncement("Treffpunkt geloescht");
+    if (callback) callback({ ok: true });
   });
 
-  socket.on("sendBroadcastMessage", (data) => {
+  socket.on("sendBroadcastMessage", (data, callback) => {
     const message = String(data?.message || "").trim();
-    if (!message) return;
+    if (!message) {
+      if (callback) callback({ ok: false, reason: "Nachricht fehlt" });
+      return;
+    }
 
     emitAdminMessage(message);
     emitAnnouncement(message);
+    if (callback) callback({ ok: true });
   });
 
   socket.on("sendPrivateMessage", (data, callback) => {

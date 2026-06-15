@@ -122,6 +122,12 @@ export default function AdminMap({
   onMeetingPoint: (point: MapPoint) => void;
   onAreaPoint: (point: MapPoint) => void;
 }) {
+  const getRoleColor = (role: Player["role"]) => {
+    if (role === "agent") return "#2563eb";
+    if (role === "hunter") return "#dc2626";
+    return "#4b5563";
+  };
+
   return (
     <MapContainer
       center={[47.3769, 8.5417]}
@@ -202,6 +208,7 @@ export default function AdminMap({
       )}
 
       {adminPosition && (
+        adminPosition.heading === null ? (
         <Marker
           position={[adminPosition.lat, adminPosition.lng]}
           icon={L.divIcon({
@@ -222,9 +229,7 @@ export default function AdminMap({
             Admin
           </Tooltip>
         </Marker>
-      )}
-
-      {adminPosition?.heading !== null && adminPosition && (
+        ) : (
         <Marker
           position={[adminPosition.lat, adminPosition.lng]}
           icon={L.divIcon({
@@ -232,26 +237,28 @@ export default function AdminMap({
             html: `<div style="
               width:0;
               height:0;
-              border-left:7px solid transparent;
-              border-right:7px solid transparent;
-              border-bottom:20px solid #facc15;
+              border-left:8px solid transparent;
+              border-right:8px solid transparent;
+              border-bottom:24px solid #facc15;
               transform:rotate(${adminPosition.heading}deg);
               transform-origin:50% 70%;
               filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));
             "></div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 14],
+            iconSize: [24, 24],
+            iconAnchor: [12, 16],
           })}
-        />
+        >
+          <Tooltip permanent direction="top" offset={[0, -18]}>
+            Admin
+          </Tooltip>
+        </Marker>
+        )
       )}
 
       {Object.values(players)
         .filter((player) => player.liveLat !== null && player.liveLng !== null)
         .map((player) => {
-          let color = "gray";
-          if (player.role === "agent") color = "blue";
-          if (player.role === "hunter") color = "red";
-
+          const color = getRoleColor(player.role);
           const outline = player.connected ? "white" : "yellow";
 
           return (
@@ -260,15 +267,27 @@ export default function AdminMap({
               position={[player.liveLat!, player.liveLng!]}
               icon={L.divIcon({
                 className: "",
-                html: `<div style="
-                  width:18px;
-                  height:18px;
-                  background:${color};
-                  border-radius:50%;
-                  border:3px solid ${outline};
-                "></div>`,
-                iconSize: [18, 18],
-                iconAnchor: [9, 9],
+                html:
+                  player.heading !== null
+                    ? `<div style="
+                        width:0;
+                        height:0;
+                        border-left:8px solid transparent;
+                        border-right:8px solid transparent;
+                        border-bottom:24px solid ${color};
+                        transform:rotate(${player.heading}deg);
+                        transform-origin:50% 70%;
+                        filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+                      "></div>`
+                    : `<div style="
+                        width:18px;
+                        height:18px;
+                        background:${color};
+                        border-radius:50%;
+                        border:3px solid ${outline};
+                      "></div>`,
+                iconSize: player.heading !== null ? [24, 24] : [18, 18],
+                iconAnchor: player.heading !== null ? [12, 16] : [9, 9],
               })}
             >
               <Tooltip permanent direction="top" offset={[0, -12]}>

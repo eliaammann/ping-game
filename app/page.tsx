@@ -112,10 +112,20 @@ export default function Home() {
   useEffect(() => {
     if (!joined || !playerId || !playerName) return;
 
-    socket.emit("registerPlayer", {
-      playerId,
-      name: playerName,
-    });
+    const registerPlayer = () => {
+      socket.emit("registerPlayer", {
+        playerId,
+        name: playerName,
+      });
+      socket.emit("requestState");
+    };
+
+    registerPlayer();
+    socket.on("connect", registerPlayer);
+
+    return () => {
+      socket.off("connect", registerPlayer);
+    };
   }, [joined, playerId, playerName]);
 
   useEffect(() => {
@@ -176,6 +186,8 @@ export default function Home() {
         setAnnouncement("");
       }, 5000);
     });
+
+    socket.emit("requestState");
 
     return () => {
       socket.off("playersUpdate");
@@ -561,6 +573,7 @@ export default function Home() {
           livePosition={livePosition}
           pingPosition={pingPosition}
           ownHeading={ownHeading}
+          ownRole={myRole}
           players={otherPlayers}
           gameArea={gameArea}
           meetingPoint={meetingPoint}

@@ -59,6 +59,11 @@ type PrivateMessageLog = {
   replyFrom?: string;
 };
 
+type ServerResponse = {
+  ok: boolean;
+  reason?: string;
+};
+
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
@@ -148,6 +153,8 @@ export default function AdminPage() {
       }, 5000);
     });
 
+    socket.emit("requestState");
+
     return () => {
       socket.off("playersUpdate");
       socket.off("pingState");
@@ -225,42 +232,96 @@ export default function AdminPage() {
     socket.emit("setRole", { playerId, role });
   };
 
+  const showServerError = (error: Error | null, response?: ServerResponse) => {
+    if (error) {
+      alert("Der Backend-Server hat nicht geantwortet. Bitte Render/Backend neu deployen.");
+      return true;
+    }
+
+    if (response && !response.ok) {
+      alert(response.reason || "Die Aktion konnte nicht ausgeführt werden.");
+      return true;
+    }
+
+    return false;
+  };
+
   const kickPlayer = (playerId: string) => {
     if (!confirm("Diesen Spieler wirklich rauswerfen?")) return;
-    socket.emit("kickPlayer", { playerId });
+    socket.timeout(4000).emit(
+      "kickPlayer",
+      { playerId },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
   };
 
   const autoAssignRoles = () => {
-    socket.emit("autoAssignRoles");
+    socket.timeout(4000).emit(
+      "autoAssignRoles",
+      (error: Error | null, response?: ServerResponse) => {
+        if (showServerError(error, response)) return;
+      }
+    );
   };
 
   const addAreaPoint = (point: MapPoint) => {
     const nextArea = [...gameArea, point];
     setGameArea(nextArea);
-    socket.emit("setGameArea", { points: nextArea });
+    socket.timeout(4000).emit(
+      "setGameArea",
+      { points: nextArea },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
   };
 
   const setMeetingPointOnMap = (point: MapPoint) => {
     setMeetingPoint(point);
     setEditMode("none");
-    socket.emit("setMeetingPoint", point);
+    socket.timeout(4000).emit(
+      "setMeetingPoint",
+      point,
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
   };
 
   const clearGameArea = () => {
     setGameArea([]);
-    socket.emit("setGameArea", { points: [] });
+    socket.timeout(4000).emit(
+      "setGameArea",
+      { points: [] },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
   };
 
   const clearMeetingPoint = () => {
     setMeetingPoint(null);
-    socket.emit("clearMeetingPoint");
+    socket.timeout(4000).emit(
+      "clearMeetingPoint",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
   };
 
   const sendBroadcastMessage = () => {
     const message = broadcastInput.trim();
     if (!message) return;
 
-    socket.emit("sendBroadcastMessage", { message });
+    socket.timeout(4000).emit(
+      "sendBroadcastMessage",
+      { message },
+      (error: Error | null, response?: ServerResponse) => {
+        if (showServerError(error, response)) return;
+      }
+    );
     setBroadcastInput("");
   };
 
@@ -268,16 +329,14 @@ export default function AdminPage() {
     const message = privateInput.trim();
     if (!selectedPlayerId || !message) return;
 
-    socket.emit(
+    socket.timeout(4000).emit(
       "sendPrivateMessage",
       {
         targetId: selectedPlayerId,
         message,
       },
-      (response: { ok: boolean; reason?: string }) => {
-        if (!response.ok) {
-          alert(response.reason || "Nachricht konnte nicht gesendet werden.");
-        }
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
       }
     );
 

@@ -46,6 +46,7 @@ export default function Map({
   livePosition,
   pingPosition,
   ownHeading,
+  ownRole,
   players,
   gameArea,
   meetingPoint,
@@ -53,10 +54,13 @@ export default function Map({
   livePosition: [number, number] | null;
   pingPosition: [number, number] | null;
   ownHeading: number | null;
+  ownRole: "unassigned" | "agent" | "hunter";
   players: Record<string, Player>;
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
 }) {
+  const ownColor =
+    ownRole === "agent" ? "#2563eb" : ownRole === "hunter" ? "#dc2626" : "#4b5563";
   const directionIcon = L.divIcon({
     className: "",
     html: `<div style="
@@ -64,7 +68,7 @@ export default function Map({
       height:0;
       border-left:7px solid transparent;
       border-right:7px solid transparent;
-      border-bottom:20px solid #111827;
+      border-bottom:20px solid ${ownColor};
       transform:rotate(${ownHeading ?? 0}deg);
       transform-origin:50% 70%;
       filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));
@@ -122,30 +126,32 @@ export default function Map({
 
       {livePosition && (
         <>
-          <Marker
-            position={livePosition}
-            icon={L.divIcon({
-              className: "",
-              html: `<div style="
-                width:16px;
-                height:16px;
-                background:blue;
-                border-radius:50%;
-                border:2px solid white;
-              "></div>`,
-              iconSize: [16, 16],
-              iconAnchor: [8, 8],
-            })}
-          >
-            <Tooltip permanent direction="top" offset={[0, -10]}>
-              Du live
-            </Tooltip>
-          </Marker>
+          {ownHeading === null && (
+            <Marker
+              position={livePosition}
+              icon={L.divIcon({
+                className: "",
+                html: `<div style="
+                  width:16px;
+                  height:16px;
+                  background:${ownColor};
+                  border-radius:50%;
+                  border:2px solid white;
+                "></div>`,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+              })}
+            >
+              <Tooltip permanent direction="top" offset={[0, -10]}>
+                Du live
+              </Tooltip>
+            </Marker>
+          )}
 
           {ownHeading !== null && (
             <Marker position={livePosition} icon={directionIcon}>
-              <Tooltip direction="top" offset={[0, -18]}>
-                Deine Blickrichtung
+              <Tooltip permanent direction="top" offset={[0, -18]}>
+                Du live
               </Tooltip>
             </Marker>
           )}
