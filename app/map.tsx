@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Polygon, useMap, Tooltip } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -26,6 +26,14 @@ type Player = {
 type MapPoint = {
   lat: number;
   lng: number;
+};
+
+type LoadedMarking = {
+  id: string;
+  name: string;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+  startPoint: MapPoint | null;
 };
 
 function InitialCenter({ position }: { position: [number, number] }) {
@@ -82,6 +90,7 @@ export default function Map({
   targetArea,
   startPoint,
   targetFocusKey,
+  loadedMarkings,
 }: {
   livePosition: [number, number] | null;
   pingPosition: [number, number] | null;
@@ -93,6 +102,7 @@ export default function Map({
   targetArea: MapPoint[];
   startPoint: MapPoint | null;
   targetFocusKey: number;
+  loadedMarkings: LoadedMarking[];
 }) {
   const ownColor =
     ownRole === "agent" ? "#2563eb" : ownRole === "hunter" ? "#dc2626" : "#4b5563";
@@ -149,6 +159,72 @@ export default function Map({
           <FitToArea points={targetArea} focusKey={targetFocusKey} />
         </>
       )}
+
+      {loadedMarkings.map((marking) => (
+        <Fragment key={marking.id}>
+          {marking.gameArea.length >= 3 && (
+            <Polygon
+              positions={marking.gameArea.map((point) => [point.lat, point.lng])}
+              pathOptions={{
+                color: "#15803d",
+                fillColor: "#86efac",
+                fillOpacity: 0.12,
+                weight: 2,
+                dashArray: "6 6",
+              }}
+            />
+          )}
+
+          {marking.meetingPoint && (
+            <Marker
+              position={[marking.meetingPoint.lat, marking.meetingPoint.lng]}
+              icon={L.divIcon({
+                className: "",
+                html: `<div style="
+                  width:22px;
+                  height:22px;
+                  background:#f97316;
+                  border-radius:50% 50% 50% 0;
+                  border:3px solid white;
+                  transform:rotate(-45deg);
+                  box-shadow:0 2px 6px rgba(0,0,0,0.35);
+                  opacity:0.85;
+                "></div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 20],
+              })}
+            >
+              <Tooltip permanent direction="top" offset={[0, -20]}>
+                {marking.name}
+              </Tooltip>
+            </Marker>
+          )}
+
+          {marking.startPoint && (
+            <Marker
+              position={[marking.startPoint.lat, marking.startPoint.lng]}
+              icon={L.divIcon({
+                className: "",
+                html: `<div style="
+                  width:20px;
+                  height:20px;
+                  background:#14b8a6;
+                  border-radius:50%;
+                  border:3px solid white;
+                  box-shadow:0 2px 6px rgba(0,0,0,0.35);
+                  opacity:0.85;
+                "></div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10],
+              })}
+            >
+              <Tooltip permanent direction="top" offset={[0, -12]}>
+                {marking.name}
+              </Tooltip>
+            </Marker>
+          )}
+        </Fragment>
+      ))}
 
       {meetingPoint && (
         <Marker

@@ -47,7 +47,19 @@ type MapState = {
   meetingPoint: MapPoint | null;
   targetArea: MapPoint[];
   playerStartPoints: Record<string, MapPoint>;
+  savedMarkings: SavedMarking[];
+  loadedMarkings: SavedMarking[];
   hasTargetPassword: boolean;
+};
+
+type SavedMarking = {
+  id: string;
+  name: string;
+  createdAt: number;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+  targetArea: MapPoint[];
+  playerStartPoints: Record<string, MapPoint>;
 };
 
 type EditMode = "none" | "meeting" | "area" | "target" | "start";
@@ -98,6 +110,10 @@ export default function AdminPage() {
   const [targetPasswordDraft, setTargetPasswordDraft] = useState("");
   const [hasTargetPassword, setHasTargetPassword] = useState(false);
   const [playerStartPoints, setPlayerStartPoints] = useState<Record<string, MapPoint>>({});
+  const [savedMarkings, setSavedMarkings] = useState<SavedMarking[]>([]);
+  const [loadedMarkings, setLoadedMarkings] = useState<SavedMarking[]>([]);
+  const [showMarkingPanel, setShowMarkingPanel] = useState(false);
+  const [markingNameInput, setMarkingNameInput] = useState("");
   const [editMode, setEditMode] = useState<EditMode>("none");
   const [broadcastInput, setBroadcastInput] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
@@ -150,6 +166,8 @@ export default function AdminPage() {
       setMeetingPoint(data.meetingPoint);
       setTargetArea(data.targetArea || []);
       setPlayerStartPoints(data.playerStartPoints || {});
+      setSavedMarkings(data.savedMarkings || []);
+      setLoadedMarkings(data.loadedMarkings || []);
       setHasTargetPassword(data.hasTargetPassword);
     });
 
@@ -488,6 +506,57 @@ export default function AdminPage() {
     );
   };
 
+  const saveCurrentMarkings = () => {
+    const name = markingNameInput.trim();
+    if (!name) {
+      alert("Bitte einen Namen eingeben.");
+      return;
+    }
+
+    socket.timeout(4000).emit(
+      "saveCurrentMarkings",
+      { name },
+      (error: Error | null, response?: ServerResponse & { savedMarkings?: SavedMarking[] }) => {
+        if (showServerError(error, response)) return;
+
+        if (response?.savedMarkings) {
+          setSavedMarkings(response.savedMarkings);
+        }
+        setMarkingNameInput("");
+      }
+    );
+  };
+
+  const loadSavedMarking = (markingId: string) => {
+    socket.timeout(4000).emit(
+      "loadSavedMarking",
+      { id: markingId },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const clearActiveMapMarkings = () => {
+    if (!confirm("Alle aktuell eingezeichneten Markierungen auf der Karte löschen? Gespeicherte Markierungen bleiben erhalten.")) {
+      return;
+    }
+
+    setGameArea([]);
+    setMeetingPoint(null);
+    setTargetArea([]);
+    setPlayerStartPoints({});
+    setLoadedMarkings([]);
+    setEditMode("none");
+
+    socket.timeout(4000).emit(
+      "clearActiveMapMarkings",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
   const sendBroadcastMessage = () => {
     const message = broadcastInput.trim();
     if (!message) return;
@@ -805,7 +874,59 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <div className="h-[420px] overflow-hidden rounded-xl shadow">
+        <div className="mb-3">
+          <button
+            onClick={() => setShowMarkingPanel((isOpen) => !isOpen)}
+            className="rounded bg-indigo-700 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Markierungen
+          </button>
+        </div>
+
+        {showMarkingPanel && (
+          <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={markingNameInput}
+                onChange={(event) => setMarkingNameInput(event.target.value)}
+                placeholder="Name der Markierung"
+                className="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-black"
+              />
+              <button
+                onClick={saveCurrentMarkings}
+                className="rounded bg-indigo-700 px-4 py-2 font-semibold text-white"
+              >
+                Markiertes speichern
+              </button>
+            </div>
+
+            <div className="grid gap-2">
+              {savedMarkings.length === 0 && (
+                <div className="text-sm text-gray-700">Noch keine gespeicherten Markierungen.</div>
+              )}
+
+              {savedMarkings.map((marking) => (
+                <button
+                  key={marking.id}
+                  onClick={() => loadSavedMarking(marking.id)}
+                  className="rounded border border-gray-300 bg-white px-3 py-2 text-left text-sm font-semibold text-gray-900 hover:bg-gray-100"
+                >
+                  {marking.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="relative h-[420px] overflow-hidden rounded-xl shadow">
+          <button
+            onClick={clearActiveMapMarkings}
+            className="absolute right-3 top-3 z-[1000] flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-xl font-bold text-white shadow-xl"
+            title="Alle Markierungen auf der Karte löschen"
+          >
+            ×
+          </button>
           <AdminMap
             players={mapPlayers}
             adminPosition={adminPosition}
@@ -813,6 +934,7 @@ export default function AdminPage() {
             meetingPoint={meetingPoint}
             targetArea={targetArea}
             playerStartPoints={playerStartPoints}
+            loadedMarkings={loadedMarkings}
             editMode={editMode}
             onMeetingPoint={setMeetingPointOnMap}
             onAreaPoint={addAreaPoint}

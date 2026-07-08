@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -34,6 +34,15 @@ type Player = {
 type MapPoint = {
   lat: number;
   lng: number;
+};
+
+type SavedMarking = {
+  id: string;
+  name: string;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+  targetArea: MapPoint[];
+  playerStartPoints: Record<string, MapPoint>;
 };
 
 type AdminPosition = MapPoint & {
@@ -124,6 +133,7 @@ export default function AdminMap({
   meetingPoint,
   targetArea,
   playerStartPoints,
+  loadedMarkings,
   editMode,
   onMeetingPoint,
   onAreaPoint,
@@ -136,6 +146,7 @@ export default function AdminMap({
   meetingPoint: MapPoint | null;
   targetArea: MapPoint[];
   playerStartPoints: Record<string, MapPoint>;
+  loadedMarkings: SavedMarking[];
   editMode: EditMode;
   onMeetingPoint: (point: MapPoint) => void;
   onAreaPoint: (point: MapPoint) => void;
@@ -241,6 +252,86 @@ export default function AdminMap({
             </Tooltip>
           </Marker>
         ))}
+
+      {loadedMarkings.map((marking) => (
+        <Fragment key={marking.id}>
+          {marking.gameArea.length >= 3 && (
+            <Polygon
+              positions={marking.gameArea.map((point) => [point.lat, point.lng])}
+              pathOptions={{
+                color: "#15803d",
+                fillColor: "#86efac",
+                fillOpacity: 0.12,
+                weight: 2,
+                dashArray: "6 6",
+              }}
+            />
+          )}
+
+          {marking.targetArea.length >= 3 && (
+            <Polygon
+              positions={marking.targetArea.map((point) => [point.lat, point.lng])}
+              pathOptions={{
+                color: "#a16207",
+                fillColor: "#fde047",
+                fillOpacity: 0.16,
+                weight: 2,
+                dashArray: "6 6",
+              }}
+            />
+          )}
+
+          {marking.meetingPoint && (
+            <Marker
+              position={[marking.meetingPoint.lat, marking.meetingPoint.lng]}
+              icon={L.divIcon({
+                className: "",
+                html: `<div style="
+                  width:22px;
+                  height:22px;
+                  background:#f97316;
+                  border-radius:50% 50% 50% 0;
+                  border:3px solid white;
+                  transform:rotate(-45deg);
+                  box-shadow:0 2px 6px rgba(0,0,0,0.35);
+                  opacity:0.85;
+                "></div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 20],
+              })}
+            >
+              <Tooltip permanent direction="top" offset={[0, -20]}>
+                {marking.name}
+              </Tooltip>
+            </Marker>
+          )}
+
+          {Object.entries(marking.playerStartPoints).map(([playerId, point]) => (
+            <Marker
+              key={`${marking.id}-${playerId}`}
+              position={[point.lat, point.lng]}
+              icon={L.divIcon({
+                className: "",
+                html: `<div style="
+                  width:20px;
+                  height:20px;
+                  background:#14b8a6;
+                  border-radius:50%;
+                  border:3px solid white;
+                  box-shadow:0 2px 6px rgba(0,0,0,0.35);
+                  opacity:0.85;
+                "></div>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10],
+              })}
+            >
+              <Tooltip permanent direction="top" offset={[0, -12]}>
+                {marking.name}
+              </Tooltip>
+            </Marker>
+          ))}
+        </Fragment>
+      ))}
 
       {meetingPoint && (
         <Marker

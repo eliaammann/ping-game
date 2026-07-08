@@ -50,6 +50,15 @@ type MapState = {
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
   startPoint: MapPoint | null;
+  loadedMarkings: LoadedMarking[];
+};
+
+type LoadedMarking = {
+  id: string;
+  name: string;
+  gameArea: MapPoint[];
+  meetingPoint: MapPoint | null;
+  startPoint: MapPoint | null;
 };
 
 type PrivateMessage = {
@@ -90,6 +99,7 @@ export default function Home() {
   const [gameArea, setGameArea] = useState<MapPoint[]>([]);
   const [meetingPoint, setMeetingPoint] = useState<MapPoint | null>(null);
   const [startPoint, setStartPoint] = useState<MapPoint | null>(null);
+  const [loadedMarkings, setLoadedMarkings] = useState<LoadedMarking[]>([]);
   const [targetArea, setTargetArea] = useState<MapPoint[]>([]);
   const [targetPasswordInput, setTargetPasswordInput] = useState("");
   const [showTargetUnlock, setShowTargetUnlock] = useState(false);
@@ -173,6 +183,7 @@ export default function Home() {
       setGameArea(data.gameArea || []);
       setMeetingPoint(data.meetingPoint);
       setStartPoint(data.startPoint || null);
+      setLoadedMarkings(data.loadedMarkings || []);
     });
 
     socket.on("targetAreaState", (data: { targetArea: MapPoint[] }) => {
@@ -703,6 +714,7 @@ export default function Home() {
           targetArea={targetArea}
           startPoint={startPoint}
           targetFocusKey={targetFocusKey}
+          loadedMarkings={loadedMarkings}
         />
       </div>
 

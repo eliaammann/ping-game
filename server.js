@@ -18,6 +18,8 @@ let meetingPoint = null;
 let targetArea = [];
 let targetPassword = "";
 let playerStartPoints = {};
+let savedMarkings = [];
+let loadedMarkings = [];
 let adminSockets = new Set();
 let targetUnlockedPlayers = new Set();
 
@@ -81,6 +83,13 @@ function emitMapState() {
       gameArea,
       meetingPoint,
       startPoint: playerStartPoints[player.playerId] || null,
+      loadedMarkings: loadedMarkings.map((marking) => ({
+        id: marking.id,
+        name: marking.name,
+        gameArea: marking.gameArea,
+        meetingPoint: marking.meetingPoint,
+        startPoint: marking.playerStartPoints[player.playerId] || null,
+      })),
     });
   });
 
@@ -91,6 +100,8 @@ function emitMapState() {
       meetingPoint,
       targetArea,
       playerStartPoints,
+      savedMarkings,
+      loadedMarkings,
       hasTargetPassword: Boolean(targetPassword),
     });
   });
@@ -101,6 +112,7 @@ function emitInitialMapState(socket) {
     gameArea,
     meetingPoint,
     startPoint: null,
+    loadedMarkings: [],
   });
 }
 
@@ -111,6 +123,8 @@ function emitAdminMapState(socket) {
     meetingPoint,
     targetArea,
     playerStartPoints,
+    savedMarkings,
+    loadedMarkings,
     hasTargetPassword: Boolean(targetPassword),
   });
 }
@@ -163,6 +177,7 @@ function resetGameState() {
   targetArea = [];
   targetPassword = "";
   playerStartPoints = {};
+  loadedMarkings = [];
   targetUnlockedPlayers = new Set();
   nextPingAt = null;
   remainingPingMs = pingIntervalMs;
@@ -180,6 +195,55 @@ function resetGameState() {
   emitPlayers();
   emitPingState();
   emitCatchState();
+  emitMapState();
+  io.emit("targetAreaState", { targetArea: [] });
+}
+
+function clonePoints(points) {
+  return points.map((point) => ({
+    lat: Number(point.lat),
+    lng: Number(point.lng),
+  }));
+}
+
+function cloneStartPoints(pointsByPlayer) {
+  return Object.fromEntries(
+    Object.entries(pointsByPlayer).map(([playerId, point]) => [
+      playerId,
+      {
+        lat: Number(point.lat),
+        lng: Number(point.lng),
+      },
+    ])
+  );
+}
+
+function createMarkingSnapshot(name) {
+  return {
+    id: "marking-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+    name,
+    createdAt: Date.now(),
+    gameArea: clonePoints(gameArea),
+    meetingPoint: meetingPoint
+      ? {
+          lat: Number(meetingPoint.lat),
+          lng: Number(meetingPoint.lng),
+        }
+      : null,
+    targetArea: clonePoints(targetArea),
+    playerStartPoints: cloneStartPoints(playerStartPoints),
+  };
+}
+
+function clearActiveMapMarkings() {
+  gameArea = [];
+  meetingPoint = null;
+  targetArea = [];
+  targetPassword = "";
+  playerStartPoints = {};
+  loadedMarkings = [];
+  targetUnlockedPlayers = new Set();
+
   emitMapState();
   io.emit("targetAreaState", { targetArea: [] });
 }
@@ -239,6 +303,13 @@ io.on("connection", (socket) => {
       gameArea,
       meetingPoint,
       startPoint: playerStartPoints[playerId] || null,
+      loadedMarkings: loadedMarkings.map((marking) => ({
+        id: marking.id,
+        name: marking.name,
+        gameArea: marking.gameArea,
+        meetingPoint: marking.meetingPoint,
+        startPoint: marking.playerStartPoints[playerId] || null,
+      })),
     });
     if (targetUnlockedPlayers.has(playerId)) {
       io.to(socket.id).emit("targetAreaState", { targetArea });
@@ -427,6 +498,61 @@ io.on("connection", (socket) => {
     delete playerStartPoints[playerId];
     emitMapState();
     emitAnnouncement("Startpunkt geloescht");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("saveCurrentMarkings", (data, callback) => {
+    const name = String(data?.name || "").trim();
+
+    if (!name) {
+      if (callback) callback({ ok: false, reason: "Name fehlt" });
+      return;
+    }
+
+    const hasAnyMarking =
+      gameArea.length > 0 ||
+      Boolean(meetingPoint) ||
+      targetArea.length > 0 ||
+      Object.keys(playerStartPoints).length > 0;
+
+    if (!hasAnyMarking) {
+      if (callback) callback({ ok: false, reason: "Es gibt keine Markierungen zum Speichern" });
+      return;
+    }
+
+    const snapshot = createMarkingSnapshot(name);
+    savedMarkings = [snapshot, ...savedMarkings].slice(0, 30);
+
+    emitMapState();
+    emitAnnouncement("Markierungen gespeichert");
+    if (callback) callback({ ok: true, savedMarkings });
+  });
+
+  socket.on("loadSavedMarking", (data, callback) => {
+    const markingId = data?.id;
+    const marking = savedMarkings.find((entry) => entry.id === markingId);
+
+    if (!marking) {
+      if (callback) callback({ ok: false, reason: "Markierung nicht gefunden" });
+      return;
+    }
+
+    loadedMarkings = [
+      ...loadedMarkings,
+      {
+        ...marking,
+        id: "loaded-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+      },
+    ].slice(-20);
+
+    emitMapState();
+    emitAnnouncement("Markierung geladen");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("clearActiveMapMarkings", (callback) => {
+    clearActiveMapMarkings();
+    emitAnnouncement("Markierungen geloescht");
     if (callback) callback({ ok: true });
   });
 
