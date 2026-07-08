@@ -41,7 +41,7 @@ type AdminPosition = MapPoint & {
   updatedAt: number;
 };
 
-type EditMode = "none" | "meeting" | "area";
+type EditMode = "none" | "meeting" | "area" | "target" | "start";
 
 function InitialFitToPlayers({ players }: { players: Record<string, Player> }) {
   const map = useMap();
@@ -80,10 +80,14 @@ function MapClickHandler({
   editMode,
   onMeetingPoint,
   onAreaPoint,
+  onTargetAreaPoint,
+  onStartPoint,
 }: {
   editMode: EditMode;
   onMeetingPoint: (point: MapPoint) => void;
   onAreaPoint: (point: MapPoint) => void;
+  onTargetAreaPoint: (point: MapPoint) => void;
+  onStartPoint: (point: MapPoint) => void;
 }) {
   useMapEvents({
     click(event) {
@@ -99,6 +103,14 @@ function MapClickHandler({
       if (editMode === "area") {
         onAreaPoint(point);
       }
+
+      if (editMode === "target") {
+        onTargetAreaPoint(point);
+      }
+
+      if (editMode === "start") {
+        onStartPoint(point);
+      }
     },
   });
 
@@ -110,17 +122,25 @@ export default function AdminMap({
   adminPosition,
   gameArea,
   meetingPoint,
+  targetArea,
+  playerStartPoints,
   editMode,
   onMeetingPoint,
   onAreaPoint,
+  onTargetAreaPoint,
+  onStartPoint,
 }: {
   players: Record<string, Player>;
   adminPosition: AdminPosition | null;
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
+  targetArea: MapPoint[];
+  playerStartPoints: Record<string, MapPoint>;
   editMode: EditMode;
   onMeetingPoint: (point: MapPoint) => void;
   onAreaPoint: (point: MapPoint) => void;
+  onTargetAreaPoint: (point: MapPoint) => void;
+  onStartPoint: (point: MapPoint) => void;
 }) {
   const getRoleColor = (role: Player["role"]) => {
     if (role === "agent") return "#2563eb";
@@ -144,6 +164,8 @@ export default function AdminMap({
         editMode={editMode}
         onMeetingPoint={onMeetingPoint}
         onAreaPoint={onAreaPoint}
+        onTargetAreaPoint={onTargetAreaPoint}
+        onStartPoint={onStartPoint}
       />
 
       {gameArea.length >= 3 && (
@@ -183,6 +205,43 @@ export default function AdminMap({
           </Marker>
         ))}
 
+      {targetArea.length >= 3 && (
+        <Polygon
+          positions={targetArea.map((point) => [point.lat, point.lng])}
+          pathOptions={{
+            color: "#ca8a04",
+            fillColor: "#facc15",
+            fillOpacity: 0.22,
+            weight: 3,
+          }}
+        />
+      )}
+
+      {targetArea.length > 0 &&
+        targetArea.map((point, index) => (
+          <Marker
+            key={`target-${point.lat}-${point.lng}-${index}`}
+            position={[point.lat, point.lng]}
+            icon={L.divIcon({
+              className: "",
+              html: `<div style="
+                width:16px;
+                height:16px;
+                background:#eab308;
+                border-radius:50%;
+                border:2px solid white;
+                box-shadow:0 1px 4px rgba(0,0,0,0.35);
+              "></div>`,
+              iconSize: [16, 16],
+              iconAnchor: [8, 8],
+            })}
+          >
+            <Tooltip permanent direction="top" offset={[0, -10]}>
+              Ziel {index + 1}
+            </Tooltip>
+          </Marker>
+        ))}
+
       {meetingPoint && (
         <Marker
           position={[meetingPoint.lat, meetingPoint.lng]}
@@ -206,6 +265,34 @@ export default function AdminMap({
           </Tooltip>
         </Marker>
       )}
+
+      {Object.entries(playerStartPoints).map(([playerId, point]) => {
+        const player = players[playerId];
+
+        return (
+          <Marker
+            key={`start-${playerId}`}
+            position={[point.lat, point.lng]}
+            icon={L.divIcon({
+              className: "",
+              html: `<div style="
+                width:22px;
+                height:22px;
+                background:#0f766e;
+                border-radius:50%;
+                border:3px solid white;
+                box-shadow:0 2px 6px rgba(0,0,0,0.35);
+              "></div>`,
+              iconSize: [22, 22],
+              iconAnchor: [11, 11],
+            })}
+          >
+            <Tooltip permanent direction="top" offset={[0, -13]}>
+              Start: {player?.name || playerId}
+            </Tooltip>
+          </Marker>
+        );
+      })}
 
       {adminPosition && (
         adminPosition.heading === null ? (

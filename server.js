@@ -15,19 +15,59 @@ let pendingCatch = null;
 let adminPosition = null;
 let gameArea = [];
 let meetingPoint = null;
+let targetArea = [];
+let targetPassword = "";
+let playerStartPoints = {};
+let adminSockets = new Set();
+let targetUnlockedPlayers = new Set();
 
 // Standard: 5 Minuten
 let pingIntervalMs = 5 * 60 * 1000;
-let nextPingAt = Date.now() + pingIntervalMs;
+let nextPingAt = null;
+let remainingPingMs = pingIntervalMs;
+let isPingRunning = false;
 
 function emitPlayers() {
-  io.emit("playersUpdate", players);
+  adminSockets.forEach((socketId) => {
+    io.to(socketId).emit("playersUpdate", players);
+  });
+
+  Object.values(players).forEach((recipient) => {
+    const visiblePlayers = Object.fromEntries(
+      Object.entries(players).map(([playerId, player]) => {
+        if (isPingRunning || playerId === recipient.playerId) {
+          return [playerId, player];
+        }
+
+        return [
+          playerId,
+          {
+            ...player,
+            liveLat: null,
+            liveLng: null,
+            pingLat: null,
+            pingLng: null,
+            heading: null,
+          },
+        ];
+      })
+    );
+
+    io.to(recipient.socketId).emit("playersUpdate", visiblePlayers);
+  });
 }
 
 function emitPingState() {
+  const currentRemainingMs =
+    isPingRunning && nextPingAt
+      ? Math.max(0, nextPingAt - Date.now())
+      : remainingPingMs;
+
   io.emit("pingState", {
     nextPingAt,
     pingIntervalMs,
+    remainingPingMs: currentRemainingMs,
+    isPingRunning,
   });
 }
 
@@ -36,10 +76,50 @@ function emitCatchState() {
 }
 
 function emitMapState() {
-  io.emit("mapState", {
+  Object.values(players).forEach((player) => {
+    io.to(player.socketId).emit("mapState", {
+      gameArea,
+      meetingPoint,
+      startPoint: playerStartPoints[player.playerId] || null,
+    });
+  });
+
+  adminSockets.forEach((socketId) => {
+    io.to(socketId).emit("adminMapState", {
+      adminPosition,
+      gameArea,
+      meetingPoint,
+      targetArea,
+      playerStartPoints,
+      hasTargetPassword: Boolean(targetPassword),
+    });
+  });
+}
+
+function emitInitialMapState(socket) {
+  socket.emit("mapState", {
+    gameArea,
+    meetingPoint,
+    startPoint: null,
+  });
+}
+
+function emitAdminMapState(socket) {
+  socket.emit("adminMapState", {
     adminPosition,
     gameArea,
     meetingPoint,
+    targetArea,
+    playerStartPoints,
+    hasTargetPassword: Boolean(targetPassword),
+  });
+}
+
+function emitTargetAreaToUnlockedPlayers() {
+  Object.values(players).forEach((player) => {
+    if (targetUnlockedPlayers.has(player.playerId)) {
+      io.to(player.socketId).emit("targetAreaState", { targetArea });
+    }
   });
 }
 
@@ -75,18 +155,59 @@ function runPing() {
   emitPlayers();
 }
 
+function resetGameState() {
+  pendingCatch = null;
+  adminPosition = null;
+  gameArea = [];
+  meetingPoint = null;
+  targetArea = [];
+  targetPassword = "";
+  playerStartPoints = {};
+  targetUnlockedPlayers = new Set();
+  nextPingAt = null;
+  remainingPingMs = pingIntervalMs;
+  isPingRunning = false;
+
+  Object.keys(players).forEach((playerId) => {
+    players[playerId] = {
+      ...players[playerId],
+      role: "unassigned",
+      pingLat: null,
+      pingLng: null,
+    };
+  });
+
+  emitPlayers();
+  emitPingState();
+  emitCatchState();
+  emitMapState();
+  io.emit("targetAreaState", { targetArea: [] });
+}
+
 io.on("connection", (socket) => {
   console.log("Socket verbunden:", socket.id);
 
   emitPingState();
   emitCatchState();
-  emitMapState();
+  emitInitialMapState(socket);
 
   socket.on("requestState", (callback) => {
     emitPlayers();
     emitPingState();
     emitCatchState();
-    emitMapState();
+    emitInitialMapState(socket);
+    if (adminSockets.has(socket.id)) {
+      emitAdminMapState(socket);
+    }
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("registerAdmin", (callback) => {
+    adminSockets.add(socket.id);
+    socket.emit("playersUpdate", players);
+    emitPingState();
+    emitCatchState();
+    emitAdminMapState(socket);
     if (callback) callback({ ok: true });
   });
 
@@ -114,7 +235,14 @@ io.on("connection", (socket) => {
     emitPlayers();
     emitPingState();
     emitCatchState();
-    emitMapState();
+    io.to(socket.id).emit("mapState", {
+      gameArea,
+      meetingPoint,
+      startPoint: playerStartPoints[playerId] || null,
+    });
+    if (targetUnlockedPlayers.has(playerId)) {
+      io.to(socket.id).emit("targetAreaState", { targetArea });
+    }
   });
 
   socket.on("updatePosition", (data) => {
@@ -212,6 +340,41 @@ io.on("connection", (socket) => {
     if (callback) callback({ ok: true, agentId });
   });
 
+  socket.on("triggerPingNow", (callback) => {
+    runPing();
+    if (isPingRunning) {
+      nextPingAt = Date.now() + pingIntervalMs;
+      remainingPingMs = pingIntervalMs;
+    }
+    emitPingState();
+    emitAnnouncement("Ping wurde manuell ausgelöst");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("setPingRunning", (data, callback) => {
+    const shouldRun = Boolean(data?.isRunning);
+
+    if (shouldRun) {
+      isPingRunning = true;
+      nextPingAt = Date.now() + (remainingPingMs || pingIntervalMs);
+    } else {
+      remainingPingMs = nextPingAt ? Math.max(0, nextPingAt - Date.now()) : remainingPingMs;
+      isPingRunning = false;
+      nextPingAt = null;
+    }
+
+    emitPingState();
+    emitPlayers();
+    emitAnnouncement(shouldRun ? "Ping-Countdown gestartet" : "Ping-Countdown angehalten");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("resetGame", (callback) => {
+    resetGameState();
+    emitAnnouncement("Spiel wurde zurückgesetzt");
+    if (callback) callback({ ok: true });
+  });
+
   socket.on("updateAdminPosition", (data) => {
     const lat = Number(data?.lat);
     const lng = Number(data?.lng);
@@ -226,6 +389,45 @@ io.on("connection", (socket) => {
     };
 
     emitMapState();
+  });
+
+  socket.on("setStartPoint", (data, callback) => {
+    const playerId = data?.playerId;
+    const lat = Number(data?.point?.lat);
+    const lng = Number(data?.point?.lng);
+
+    if (!playerId || !players[playerId]) {
+      if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
+      return;
+    }
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      if (callback) callback({ ok: false, reason: "Startpunkt fehlt" });
+      return;
+    }
+
+    playerStartPoints[playerId] = {
+      lat,
+      lng,
+      updatedAt: Date.now(),
+    };
+
+    emitMapState();
+    emitAnnouncement("Startpunkt gesetzt");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("clearStartPoint", (data, callback) => {
+    const playerId = data?.playerId;
+    if (!playerId || !players[playerId]) {
+      if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
+      return;
+    }
+
+    delete playerStartPoints[playerId];
+    emitMapState();
+    emitAnnouncement("Startpunkt geloescht");
+    if (callback) callback({ ok: true });
   });
 
   socket.on("setGameArea", (data, callback) => {
@@ -244,6 +446,62 @@ io.on("connection", (socket) => {
 
     emitMapState();
     emitAnnouncement(gameArea.length > 0 ? "Spielbereich aktualisiert" : "Spielbereich geloescht");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("setTargetArea", (data, callback) => {
+    if (!Array.isArray(data?.points)) {
+      if (callback) callback({ ok: false, reason: "Zielbereich fehlt" });
+      return;
+    }
+
+    const nextPassword = String(data?.password ?? targetPassword).trim();
+    if (!nextPassword) {
+      if (callback) callback({ ok: false, reason: "Passwort fehlt" });
+      return;
+    }
+
+    targetPassword = nextPassword;
+    targetArea = data.points
+      .map((point) => ({
+        lat: Number(point?.lat),
+        lng: Number(point?.lng),
+      }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+      .slice(0, 30);
+
+    emitMapState();
+    emitTargetAreaToUnlockedPlayers();
+    emitAnnouncement(targetArea.length > 0 ? "Zielbereich aktualisiert" : "Zielbereich vorbereitet");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("clearTargetArea", (callback) => {
+    targetArea = [];
+    targetPassword = "";
+    targetUnlockedPlayers = new Set();
+    emitMapState();
+    io.emit("targetAreaState", { targetArea: [] });
+    emitAnnouncement("Zielbereich geloescht");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("unlockTargetArea", (data, callback) => {
+    const playerId = data?.playerId;
+    const password = String(data?.password || "").trim();
+
+    if (!playerId || !players[playerId]) {
+      if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
+      return;
+    }
+
+    if (!targetPassword || password !== targetPassword) {
+      if (callback) callback({ ok: false, reason: "Falsches Passwort" });
+      return;
+    }
+
+    targetUnlockedPlayers.add(playerId);
+    io.to(players[playerId].socketId).emit("targetAreaState", { targetArea });
     if (callback) callback({ ok: true });
   });
 
@@ -309,6 +567,30 @@ io.on("connection", (socket) => {
     if (callback) callback({ ok: true });
   });
 
+  socket.on("sendPlayerMessage", (data, callback) => {
+    const playerId = data?.playerId;
+    const message = String(data?.message || "").trim();
+
+    if (!playerId || !players[playerId] || !message) {
+      if (callback) callback({ ok: false, reason: "Spieler oder Nachricht fehlt" });
+      return;
+    }
+
+    const playerMessage = {
+      id: "player-message-" + Date.now(),
+      playerId,
+      playerName: players[playerId].name,
+      message,
+      createdAt: Date.now(),
+    };
+
+    adminSockets.forEach((socketId) => {
+      io.to(socketId).emit("playerMessageSent", playerMessage);
+    });
+
+    if (callback) callback({ ok: true });
+  });
+
   socket.on("sendPrivateReply", (data) => {
     const playerId = data?.playerId;
     const messageId = data?.messageId;
@@ -333,7 +615,8 @@ io.on("connection", (socket) => {
     if (seconds < 5 || seconds > 3600) return;
 
     pingIntervalMs = seconds * 1000;
-    nextPingAt = Date.now() + pingIntervalMs;
+    remainingPingMs = pingIntervalMs;
+    nextPingAt = isPingRunning ? Date.now() + pingIntervalMs : null;
 
     console.log("Neue Pingdauer:", seconds, "Sekunden");
 
@@ -427,7 +710,8 @@ io.on("connection", (socket) => {
     emitCatchState();
     emitAnnouncement("Catch bestätigt, Rollen werden aktualisiert, Spiel startet neu");
 
-    nextPingAt = Date.now() + pingIntervalMs;
+    remainingPingMs = pingIntervalMs;
+    nextPingAt = isPingRunning ? Date.now() + pingIntervalMs : null;
     emitPingState();
   });
 
@@ -441,6 +725,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("Socket getrennt:", socket.id);
+    adminSockets.delete(socket.id);
 
     Object.keys(players).forEach((playerId) => {
       if (players[playerId].socketId === socket.id) {
@@ -458,9 +743,10 @@ io.on("connection", (socket) => {
 setInterval(() => {
   const now = Date.now();
 
-  if (now >= nextPingAt) {
+  if (isPingRunning && nextPingAt && now >= nextPingAt) {
     runPing();
     nextPingAt = now + pingIntervalMs;
+    remainingPingMs = pingIntervalMs;
     emitPingState();
   }
 

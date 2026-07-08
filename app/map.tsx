@@ -42,6 +42,35 @@ function InitialCenter({ position }: { position: [number, number] }) {
   return null;
 }
 
+function FitToArea({
+  points,
+  focusKey,
+}: {
+  points: MapPoint[];
+  focusKey: number;
+}) {
+  const map = useMap();
+  const lastFocusKey = useRef(0);
+
+  useEffect(() => {
+    if (focusKey === 0 || focusKey === lastFocusKey.current || points.length === 0) {
+      return;
+    }
+
+    lastFocusKey.current = focusKey;
+
+    if (points.length === 1) {
+      map.setView([points[0].lat, points[0].lng], 16);
+      return;
+    }
+
+    const bounds = L.latLngBounds(points.map((point) => [point.lat, point.lng]));
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }, [focusKey, map, points]);
+
+  return null;
+}
+
 export default function Map({
   livePosition,
   pingPosition,
@@ -50,6 +79,9 @@ export default function Map({
   players,
   gameArea,
   meetingPoint,
+  targetArea,
+  startPoint,
+  targetFocusKey,
 }: {
   livePosition: [number, number] | null;
   pingPosition: [number, number] | null;
@@ -58,6 +90,9 @@ export default function Map({
   players: Record<string, Player>;
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
+  targetArea: MapPoint[];
+  startPoint: MapPoint | null;
+  targetFocusKey: number;
 }) {
   const ownColor =
     ownRole === "agent" ? "#2563eb" : ownRole === "hunter" ? "#dc2626" : "#4b5563";
@@ -100,6 +135,21 @@ export default function Map({
         />
       )}
 
+      {targetArea.length >= 3 && (
+        <>
+          <Polygon
+            positions={targetArea.map((point) => [point.lat, point.lng])}
+            pathOptions={{
+              color: "#ca8a04",
+              fillColor: "#facc15",
+              fillOpacity: 0.22,
+              weight: 3,
+            }}
+          />
+          <FitToArea points={targetArea} focusKey={targetFocusKey} />
+        </>
+      )}
+
       {meetingPoint && (
         <Marker
           position={[meetingPoint.lat, meetingPoint.lng]}
@@ -120,6 +170,29 @@ export default function Map({
         >
           <Tooltip permanent direction="top" offset={[0, -22]}>
             Treffpunkt
+          </Tooltip>
+        </Marker>
+      )}
+
+      {startPoint && (
+        <Marker
+          position={[startPoint.lat, startPoint.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:24px;
+              height:24px;
+              background:#0f766e;
+              border-radius:50%;
+              border:3px solid white;
+              box-shadow:0 2px 6px rgba(0,0,0,0.35);
+            "></div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          })}
+        >
+          <Tooltip permanent direction="top" offset={[0, -14]}>
+            Dein Startpunkt
           </Tooltip>
         </Marker>
       )}

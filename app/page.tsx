@@ -49,6 +49,7 @@ type MapPoint = {
 type MapState = {
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
+  startPoint: MapPoint | null;
 };
 
 type PrivateMessage = {
@@ -80,6 +81,7 @@ export default function Home() {
   const [locationMessage, setLocationMessage] = useState("Warte auf Standort...");
 
   const [nextPingAt, setNextPingAt] = useState<number | null>(null);
+  const [isPingRunning, setIsPingRunning] = useState(false);
   const [showPingFlash, setShowPingFlash] = useState(false);
 
   const [catchState, setCatchState] = useState<CatchState>(null);
@@ -87,8 +89,14 @@ export default function Home() {
   const [showCatchSelect, setShowCatchSelect] = useState(false);
   const [gameArea, setGameArea] = useState<MapPoint[]>([]);
   const [meetingPoint, setMeetingPoint] = useState<MapPoint | null>(null);
+  const [startPoint, setStartPoint] = useState<MapPoint | null>(null);
+  const [targetArea, setTargetArea] = useState<MapPoint[]>([]);
+  const [targetPasswordInput, setTargetPasswordInput] = useState("");
+  const [showTargetUnlock, setShowTargetUnlock] = useState(false);
+  const [targetFocusKey, setTargetFocusKey] = useState(0);
   const [privateMessage, setPrivateMessage] = useState<PrivateMessage | null>(null);
   const [privateReply, setPrivateReply] = useState("");
+  const [adminMessageInput, setAdminMessageInput] = useState("");
   const [kicked, setKicked] = useState(false);
 
   useEffect(() => {
@@ -142,9 +150,13 @@ export default function Home() {
       }
     });
 
-    socket.on("pingState", (data: { nextPingAt: number }) => {
-      setNextPingAt(data.nextPingAt);
-    });
+    socket.on(
+      "pingState",
+      (data: { nextPingAt: number | null; isPingRunning: boolean }) => {
+        setNextPingAt(data.nextPingAt);
+        setIsPingRunning(data.isPingRunning);
+      }
+    );
 
     socket.on("pingTriggered", () => {
       setShowPingFlash(true);
@@ -160,6 +172,15 @@ export default function Home() {
     socket.on("mapState", (data: MapState) => {
       setGameArea(data.gameArea || []);
       setMeetingPoint(data.meetingPoint);
+      setStartPoint(data.startPoint || null);
+    });
+
+    socket.on("targetAreaState", (data: { targetArea: MapPoint[] }) => {
+      setTargetArea(data.targetArea || []);
+      if ((data.targetArea || []).length > 0) {
+        setTargetFocusKey((key) => key + 1);
+        setShowTargetUnlock(false);
+      }
     });
 
     socket.on("adminMessage", (data: PrivateMessage) => {
@@ -195,6 +216,7 @@ export default function Home() {
       socket.off("pingTriggered");
       socket.off("catchState");
       socket.off("mapState");
+      socket.off("targetAreaState");
       socket.off("adminMessage");
       socket.off("privateMessage");
       socket.off("kicked");
@@ -355,10 +377,12 @@ export default function Home() {
   }, [playerId, players]);
 
   const otherPlayers = useMemo(() => {
+    if (!isPingRunning) return {};
+
     return Object.fromEntries(
       Object.entries(players).filter(([id]) => id !== playerId)
     );
-  }, [players, playerId]);
+  }, [isPingRunning, players, playerId]);
 
   const catchableAgents = useMemo(() => {
     return Object.values(players).filter(
@@ -432,6 +456,53 @@ export default function Home() {
 
     setPrivateMessage(null);
     setPrivateReply("");
+  };
+
+  const sendMessageToAdmin = () => {
+    const message = adminMessageInput.trim();
+    if (!message) return;
+
+    socket.emit(
+      "sendPlayerMessage",
+      {
+        playerId,
+        message,
+      },
+      (response: { ok: boolean; reason?: string }) => {
+        if (!response.ok) {
+          alert(response.reason || "Nachricht konnte nicht gesendet werden.");
+          return;
+        }
+
+        setAnnouncement("Nachricht an Admin gesendet");
+        setTimeout(() => {
+          setAnnouncement("");
+        }, 4000);
+      }
+    );
+
+    setAdminMessageInput("");
+  };
+
+  const unlockTargetArea = () => {
+    const password = targetPasswordInput.trim();
+    if (!password) return;
+
+    socket.emit(
+      "unlockTargetArea",
+      {
+        playerId,
+        password,
+      },
+      (response: { ok: boolean; reason?: string }) => {
+        if (!response.ok) {
+          alert(response.reason || "Passwort ist nicht korrekt.");
+          return;
+        }
+
+        setTargetPasswordInput("");
+      }
+    );
   };
 
   if (!joined) {
@@ -543,8 +614,38 @@ export default function Home() {
         </div>
       )}
 
+      {showTargetUnlock && (
+        <div className="absolute inset-x-4 top-32 z-[1260] mx-auto max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+          <h2 className="mb-2 text-lg font-bold text-black">Zielbereich anzeigen</h2>
+          <p className="mb-3 text-sm text-gray-700">
+            Gib das Passwort ein, um den Zielbereich auf deiner Karte freizuschalten.
+          </p>
+          <input
+            type="password"
+            value={targetPasswordInput}
+            onChange={(event) => setTargetPasswordInput(event.target.value)}
+            placeholder="Passwort"
+            className="mb-3 w-full rounded border border-gray-300 px-3 py-2 text-black"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={unlockTargetArea}
+              className="flex-1 rounded bg-yellow-600 px-4 py-2 font-semibold text-white"
+            >
+              Anzeigen
+            </button>
+            <button
+              onClick={() => setShowTargetUnlock(false)}
+              className="rounded bg-gray-600 px-4 py-2 font-semibold text-white"
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-gray-800 p-4 text-center text-xl font-bold text-white">
-        Nächster Ping in: {formatTime(seconds)}
+        {isPingRunning ? `Nächster Ping in: ${formatTime(seconds)}` : "Ping-Countdown angehalten"}
       </div>
 
       <div className={`${getLocationBarColor()} p-2 text-center text-sm text-white`}>
@@ -568,6 +669,28 @@ export default function Home() {
         )}
       </div>
 
+      <div className="grid gap-2 bg-white px-4 py-3 shadow-sm sm:grid-cols-[1fr_auto_auto]">
+        <input
+          type="text"
+          value={adminMessageInput}
+          onChange={(event) => setAdminMessageInput(event.target.value)}
+          placeholder="Nachricht an Admin schreiben"
+          className="min-w-0 rounded border border-gray-300 px-3 py-2 text-black"
+        />
+        <button
+          onClick={sendMessageToAdmin}
+          className="rounded bg-indigo-700 px-4 py-2 font-semibold text-white"
+        >
+          An Admin senden
+        </button>
+        <button
+          onClick={() => setShowTargetUnlock(true)}
+          className="rounded bg-yellow-600 px-4 py-2 font-semibold text-white"
+        >
+          Zielbereich anzeigen
+        </button>
+      </div>
+
       <div className="flex-1">
         <Map
           livePosition={livePosition}
@@ -577,6 +700,9 @@ export default function Home() {
           players={otherPlayers}
           gameArea={gameArea}
           meetingPoint={meetingPoint}
+          targetArea={targetArea}
+          startPoint={startPoint}
+          targetFocusKey={targetFocusKey}
         />
       </div>
 

@@ -45,9 +45,12 @@ type MapState = {
   adminPosition: AdminPosition | null;
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
+  targetArea: MapPoint[];
+  playerStartPoints: Record<string, MapPoint>;
+  hasTargetPassword: boolean;
 };
 
-type EditMode = "none" | "meeting" | "area";
+type EditMode = "none" | "meeting" | "area" | "target" | "start";
 
 type PrivateMessageLog = {
   id: string;
@@ -57,6 +60,15 @@ type PrivateMessageLog = {
   createdAt: number;
   reply?: string;
   replyFrom?: string;
+};
+
+type PlayerMessageLog = {
+  id: string;
+  playerId: string;
+  playerName: string;
+  message: string;
+  createdAt: number;
+  reply?: string;
 };
 
 type ServerResponse = {
@@ -70,6 +82,7 @@ export default function AdminPage() {
 
   const [players, setPlayers] = useState<Record<string, Player>>({});
   const [nextPingAt, setNextPingAt] = useState<number | null>(null);
+  const [isPingRunning, setIsPingRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [showPingFlash, setShowPingFlash] = useState(false);
 
@@ -81,22 +94,38 @@ export default function AdminPage() {
   const [adminPosition, setAdminPosition] = useState<AdminPosition | null>(null);
   const [gameArea, setGameArea] = useState<MapPoint[]>([]);
   const [meetingPoint, setMeetingPoint] = useState<MapPoint | null>(null);
+  const [targetArea, setTargetArea] = useState<MapPoint[]>([]);
+  const [targetPasswordDraft, setTargetPasswordDraft] = useState("");
+  const [hasTargetPassword, setHasTargetPassword] = useState(false);
+  const [playerStartPoints, setPlayerStartPoints] = useState<Record<string, MapPoint>>({});
   const [editMode, setEditMode] = useState<EditMode>("none");
   const [broadcastInput, setBroadcastInput] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [privateInput, setPrivateInput] = useState("");
   const [privateMessages, setPrivateMessages] = useState<PrivateMessageLog[]>([]);
+  const [playerMessages, setPlayerMessages] = useState<PlayerMessageLog[]>([]);
+  const [playerReplyInputs, setPlayerReplyInputs] = useState<Record<string, string>>({});
   const adminHeadingRef = useRef<number | null>(null);
 
   useEffect(() => {
     socket.on(
       "pingState",
-      (data: { nextPingAt: number; pingIntervalMs: number }) => {
+      (data: {
+        nextPingAt: number | null;
+        pingIntervalMs: number;
+        remainingPingMs: number;
+        isPingRunning: boolean;
+      }) => {
         setNextPingAt(data.nextPingAt);
+        setIsPingRunning(data.isPingRunning);
 
         const secs = Math.round(data.pingIntervalMs / 1000);
         setPingIntervalSeconds(secs);
         setPingInput(String(secs));
+
+        if (!data.isPingRunning) {
+          setSeconds(Math.ceil(data.remainingPingMs / 1000));
+        }
       }
     );
 
@@ -115,14 +144,21 @@ export default function AdminPage() {
       setCatchState(data);
     });
 
-    socket.on("mapState", (data: MapState) => {
+    socket.on("adminMapState", (data: MapState) => {
       setAdminPosition(data.adminPosition);
       setGameArea(data.gameArea || []);
       setMeetingPoint(data.meetingPoint);
+      setTargetArea(data.targetArea || []);
+      setPlayerStartPoints(data.playerStartPoints || {});
+      setHasTargetPassword(data.hasTargetPassword);
     });
 
     socket.on("privateMessageSent", (data: PrivateMessageLog) => {
       setPrivateMessages((messages) => [data, ...messages].slice(0, 20));
+    });
+
+    socket.on("playerMessageSent", (data: PlayerMessageLog) => {
+      setPlayerMessages((messages) => [data, ...messages].slice(0, 30));
     });
 
     socket.on(
@@ -160,8 +196,9 @@ export default function AdminPage() {
       socket.off("pingState");
       socket.off("pingTriggered");
       socket.off("catchState");
-      socket.off("mapState");
+      socket.off("adminMapState");
       socket.off("privateMessageSent");
+      socket.off("playerMessageSent");
       socket.off("privateReply");
       socket.off("announcement");
     };
@@ -169,8 +206,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!nextPingAt) {
-        setSeconds(0);
+      if (!isPingRunning || !nextPingAt) {
         return;
       }
 
@@ -180,7 +216,14 @@ export default function AdminPage() {
     }, 250);
 
     return () => clearInterval(interval);
-  }, [nextPingAt]);
+  }, [isPingRunning, nextPingAt]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    socket.emit("registerAdmin");
+    socket.emit("requestState");
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated || !navigator.geolocation) return;
@@ -266,6 +309,38 @@ export default function AdminPage() {
     );
   };
 
+  const triggerPingNow = () => {
+    socket.timeout(4000).emit(
+      "triggerPingNow",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const togglePingRunning = () => {
+    socket.timeout(4000).emit(
+      "setPingRunning",
+      { isRunning: !isPingRunning },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const resetGame = () => {
+    if (!confirm("Spiel wirklich zurücksetzen? Rollen, Pings, Catch-Meldungen und Kartenpunkte werden gelöscht.")) {
+      return;
+    }
+
+    socket.timeout(4000).emit(
+      "resetGame",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
   const addAreaPoint = (point: MapPoint) => {
     const nextArea = [...gameArea, point];
     setGameArea(nextArea);
@@ -278,12 +353,93 @@ export default function AdminPage() {
     );
   };
 
+  const beginTargetArea = (keepUnlockedPlayers: boolean) => {
+    const password = prompt("Passwort für den Zielbereich eingeben");
+    const trimmedPassword = password?.trim();
+    if (!trimmedPassword) return;
+
+    setTargetPasswordDraft(trimmedPassword);
+    setTargetArea([]);
+    setEditMode("target");
+
+    if (keepUnlockedPlayers) {
+      socket.timeout(4000).emit(
+        "setTargetArea",
+        {
+          points: [],
+          password: trimmedPassword,
+        },
+        (error: Error | null, response?: ServerResponse) => {
+          showServerError(error, response);
+        }
+      );
+    } else {
+      socket.timeout(4000).emit(
+        "clearTargetArea",
+        (error: Error | null, response?: ServerResponse) => {
+          showServerError(error, response);
+        }
+      );
+    }
+  };
+
+  const addTargetAreaPoint = (point: MapPoint) => {
+    const nextArea = [...targetArea, point];
+    setTargetArea(nextArea);
+    socket.timeout(4000).emit(
+      "setTargetArea",
+      {
+        points: nextArea,
+        password: targetPasswordDraft,
+      },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const clearTargetArea = () => {
+    setTargetArea([]);
+    setTargetPasswordDraft("");
+    setEditMode("none");
+    socket.timeout(4000).emit(
+      "clearTargetArea",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
   const setMeetingPointOnMap = (point: MapPoint) => {
     setMeetingPoint(point);
     setEditMode("none");
     socket.timeout(4000).emit(
       "setMeetingPoint",
       point,
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const setStartPointOnMap = (point: MapPoint) => {
+    if (!selectedPlayerId) {
+      alert("Bitte zuerst einen Spieler auswählen.");
+      setEditMode("none");
+      return;
+    }
+
+    setPlayerStartPoints((points) => ({
+      ...points,
+      [selectedPlayerId]: point,
+    }));
+    setEditMode("none");
+    socket.timeout(4000).emit(
+      "setStartPoint",
+      {
+        playerId: selectedPlayerId,
+        point,
+      },
       (error: Error | null, response?: ServerResponse) => {
         showServerError(error, response);
       }
@@ -305,6 +461,27 @@ export default function AdminPage() {
     setMeetingPoint(null);
     socket.timeout(4000).emit(
       "clearMeetingPoint",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const clearSelectedStartPoint = () => {
+    if (!selectedPlayerId) {
+      alert("Bitte zuerst einen Spieler auswählen.");
+      return;
+    }
+
+    setPlayerStartPoints((points) => {
+      const nextPoints = { ...points };
+      delete nextPoints[selectedPlayerId];
+      return nextPoints;
+    });
+
+    socket.timeout(4000).emit(
+      "clearStartPoint",
+      { playerId: selectedPlayerId },
       (error: Error | null, response?: ServerResponse) => {
         showServerError(error, response);
       }
@@ -341,6 +518,32 @@ export default function AdminPage() {
     );
 
     setPrivateInput("");
+  };
+
+  const replyToPlayerMessage = (message: PlayerMessageLog) => {
+    const reply = (playerReplyInputs[message.id] || "").trim();
+    if (!reply) return;
+
+    socket.timeout(4000).emit(
+      "sendPrivateMessage",
+      {
+        targetId: message.playerId,
+        message: reply,
+      },
+      (error: Error | null, response?: ServerResponse) => {
+        if (showServerError(error, response)) return;
+
+        setPlayerMessages((messages) =>
+          messages.map((entry) =>
+            entry.id === message.id ? { ...entry, reply } : entry
+          )
+        );
+        setPlayerReplyInputs((inputs) => ({
+          ...inputs,
+          [message.id]: "",
+        }));
+      }
+    );
   };
 
   const applyPingInterval = () => {
@@ -442,8 +645,18 @@ export default function AdminPage() {
         <h1 className="text-3xl font-bold">Admin Übersicht</h1>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="rounded-xl bg-gray-800 px-4 py-3 text-lg font-bold text-white">
-            Nächster Ping in: {formatTime(seconds)}
+          <div className="flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-white">
+            <div className="text-lg font-bold">
+              {isPingRunning ? `Nächster Ping in: ${formatTime(seconds)}` : `Pausiert bei: ${formatTime(seconds)}`}
+            </div>
+            <button
+              onClick={togglePingRunning}
+              className={`rounded px-3 py-2 text-sm font-semibold text-white ${
+                isPingRunning ? "bg-red-700" : "bg-green-700"
+              }`}
+            >
+              {isPingRunning ? "Anhalten" : "Starten"}
+            </button>
           </div>
 
           <div className="rounded-xl bg-white px-4 py-3 shadow">
@@ -479,14 +692,28 @@ export default function AdminPage() {
       <div className="mb-6 grid gap-4 lg:grid-cols-[220px_1fr]">
         <div className="rounded-2xl bg-white p-4 shadow">
           <h2 className="mb-3 text-xl font-bold text-black">Spielsteuerung</h2>
-          <button
-            onClick={autoAssignRoles}
-            className="w-full rounded bg-indigo-700 px-4 py-3 font-semibold text-white"
-          >
-            Auto Zuordnung
-          </button>
-          <div className="mt-2 text-sm text-gray-700">
-            Ein Spieler wird Agent, alle anderen werden Hunter.
+          <div className="grid gap-2">
+            <button
+              onClick={autoAssignRoles}
+              className="w-full rounded bg-indigo-700 px-4 py-3 font-semibold text-white"
+            >
+              Auto-Zuordnung
+            </button>
+            <button
+              onClick={triggerPingNow}
+              className="w-full rounded bg-gray-800 px-4 py-3 font-semibold text-white"
+            >
+              Ping jetzt
+            </button>
+            <button
+              onClick={resetGame}
+              className="w-full rounded bg-red-700 px-4 py-3 font-semibold text-white"
+            >
+              Spiel zurücksetzen
+            </button>
+          </div>
+          <div className="mt-3 text-sm text-gray-700">
+            Rollen verteilen, sofort pingen oder eine neue Runde sauber starten.
           </div>
         </div>
 
@@ -517,7 +744,12 @@ export default function AdminPage() {
             <div className="text-sm text-gray-700">
               {editMode === "meeting" && "Klicke auf die Karte, um den Treffpunkt zu setzen."}
               {editMode === "area" && "Klicke mehrere Punkte auf der Karte, um den Spielbereich zu zeichnen."}
-              {editMode === "none" && "Spielbereich, Treffpunkt und Adminposition werden hier angezeigt."}
+              {editMode === "target" && "Klicke mehrere Punkte auf der Karte, um den Zielbereich zu zeichnen."}
+              {editMode === "start" && "Klicke auf die Karte, um den Startpunkt für den ausgewählten Spieler zu setzen."}
+              {editMode === "none" &&
+                `Spielbereich, Treffpunkt und Adminposition werden hier angezeigt. Zielpasswort: ${
+                  hasTargetPassword ? "gesetzt" : "nicht gesetzt"
+                }.`}
             </div>
           </div>
 
@@ -539,6 +771,20 @@ export default function AdminPage() {
               Spielbereich zeichnen
             </button>
             <button
+              onClick={() => beginTargetArea(false)}
+              className={`rounded px-3 py-2 text-sm font-semibold text-white ${
+                editMode === "target" ? "bg-yellow-600" : "bg-yellow-700"
+              }`}
+            >
+              Zielbereich zeichnen
+            </button>
+            <button
+              onClick={() => beginTargetArea(true)}
+              className="rounded bg-yellow-600 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Zielbereich ändern
+            </button>
+            <button
               onClick={clearMeetingPoint}
               className="rounded bg-gray-600 px-3 py-2 text-sm font-semibold text-white"
             >
@@ -550,6 +796,12 @@ export default function AdminPage() {
             >
               Spielbereich löschen
             </button>
+            <button
+              onClick={clearTargetArea}
+              className="rounded bg-gray-600 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Zielbereich löschen
+            </button>
           </div>
         </div>
 
@@ -559,9 +811,13 @@ export default function AdminPage() {
             adminPosition={adminPosition}
             gameArea={gameArea}
             meetingPoint={meetingPoint}
+            targetArea={targetArea}
+            playerStartPoints={playerStartPoints}
             editMode={editMode}
             onMeetingPoint={setMeetingPointOnMap}
             onAreaPoint={addAreaPoint}
+            onTargetAreaPoint={addTargetAreaPoint}
+            onStartPoint={setStartPointOnMap}
           />
         </div>
       </div>
@@ -598,6 +854,51 @@ export default function AdminPage() {
       </div>
 
       <div className="mb-6 rounded-2xl bg-white p-4 shadow">
+        <h2 className="mb-3 text-xl font-bold text-black">Nachrichten von Spielern</h2>
+
+        {playerMessages.length === 0 && (
+          <div className="text-sm text-gray-700">Noch keine Nachrichten von Spielern.</div>
+        )}
+
+        {playerMessages.length > 0 && (
+          <div className="grid gap-3">
+            {playerMessages.map((message) => (
+              <div key={message.id} className="rounded border border-gray-200 p-3 text-sm text-gray-800">
+                <div className="mb-2">
+                  Von <strong>{message.playerName}</strong>: {message.message}
+                </div>
+                {message.reply && (
+                  <div className="mb-2 rounded bg-green-50 p-2 text-green-900">
+                    Antwort gesendet: {message.reply}
+                  </div>
+                )}
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    value={playerReplyInputs[message.id] || ""}
+                    onChange={(event) =>
+                      setPlayerReplyInputs((inputs) => ({
+                        ...inputs,
+                        [message.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="Antwort schreiben"
+                    className="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-black"
+                  />
+                  <button
+                    onClick={() => replyToPlayerMessage(message)}
+                    className="rounded bg-indigo-700 px-4 py-2 font-semibold text-white"
+                  >
+                    Antworten
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mb-6 rounded-2xl bg-white p-4 shadow">
         <h2 className="mb-3 text-xl font-bold text-black">Private Nachricht</h2>
 
         {!selectedPlayer && (
@@ -610,6 +911,20 @@ export default function AdminPage() {
           <div className="grid gap-3">
             <div className="text-sm text-gray-800">
               Ausgewählt: <strong>{selectedPlayer.name}</strong>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setEditMode("start")}
+                className="rounded bg-teal-700 px-4 py-2 font-semibold text-white"
+              >
+                Startpunkt setzen
+              </button>
+              <button
+                onClick={clearSelectedStartPoint}
+                className="rounded bg-gray-600 px-4 py-2 font-semibold text-white"
+              >
+                Startpunkt löschen
+              </button>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input
