@@ -15,9 +15,16 @@ let pendingCatch = null;
 let adminPosition = null;
 let gameArea = [];
 let meetingPoint = null;
-let targetArea = [];
+let targetAreas = {
+  1: [],
+  2: [],
+  3: [],
+  4: [],
+};
+let activeTargetSlot = 1;
 let targetPassword = "";
 let playerStartPoints = {};
+let playerTargetSlots = {};
 let savedMarkings = [];
 let loadedMarkings = [];
 let adminSockets = new Set();
@@ -73,6 +80,20 @@ function emitPingState() {
   });
 }
 
+function getValidTargetSlot(slot) {
+  const numericSlot = Number(slot);
+  return [1, 2, 3, 4].includes(numericSlot) ? numericSlot : 1;
+}
+
+function getTargetAreaForPlayer(playerId) {
+  const slot = getValidTargetSlot(playerTargetSlots[playerId] || 1);
+  return targetAreas[slot] || [];
+}
+
+function getTargetUnlockedPlayerIds() {
+  return Array.from(targetUnlockedPlayers);
+}
+
 function emitCatchState() {
   io.emit("catchState", pendingCatch);
 }
@@ -98,7 +119,11 @@ function emitMapState() {
       adminPosition,
       gameArea,
       meetingPoint,
-      targetArea,
+      targetAreas,
+      activeTargetSlot,
+      playerTargetSlots,
+      targetUnlockedPlayerIds: getTargetUnlockedPlayerIds(),
+      targetPassword,
       playerStartPoints,
       savedMarkings,
       loadedMarkings,
@@ -121,7 +146,11 @@ function emitAdminMapState(socket) {
     adminPosition,
     gameArea,
     meetingPoint,
-    targetArea,
+    targetAreas,
+    activeTargetSlot,
+    playerTargetSlots,
+    targetUnlockedPlayerIds: getTargetUnlockedPlayerIds(),
+    targetPassword,
     playerStartPoints,
     savedMarkings,
     loadedMarkings,
@@ -132,7 +161,11 @@ function emitAdminMapState(socket) {
 function emitTargetAreaToUnlockedPlayers() {
   Object.values(players).forEach((player) => {
     if (targetUnlockedPlayers.has(player.playerId)) {
-      io.to(player.socketId).emit("targetAreaState", { targetArea });
+      const slot = getValidTargetSlot(playerTargetSlots[player.playerId] || 1);
+      io.to(player.socketId).emit("targetAreaState", {
+        targetArea: getTargetAreaForPlayer(player.playerId),
+        targetSlot: slot,
+      });
     }
   });
 }
@@ -174,9 +207,16 @@ function resetGameState() {
   adminPosition = null;
   gameArea = [];
   meetingPoint = null;
-  targetArea = [];
+  targetAreas = {
+    1: [],
+    2: [],
+    3: [],
+    4: [],
+  };
+  activeTargetSlot = 1;
   targetPassword = "";
   playerStartPoints = {};
+  playerTargetSlots = {};
   loadedMarkings = [];
   targetUnlockedPlayers = new Set();
   nextPingAt = null;
@@ -196,7 +236,7 @@ function resetGameState() {
   emitPingState();
   emitCatchState();
   emitMapState();
-  io.emit("targetAreaState", { targetArea: [] });
+  io.emit("targetAreaState", { targetArea: [], targetSlot: 1 });
 }
 
 function clonePoints(points) {
@@ -230,7 +270,7 @@ function createMarkingSnapshot(name) {
           lng: Number(meetingPoint.lng),
         }
       : null,
-    targetArea: clonePoints(targetArea),
+    targetArea: clonePoints(targetAreas[activeTargetSlot] || []),
     playerStartPoints: cloneStartPoints(playerStartPoints),
   };
 }
@@ -238,14 +278,21 @@ function createMarkingSnapshot(name) {
 function clearActiveMapMarkings() {
   gameArea = [];
   meetingPoint = null;
-  targetArea = [];
+  targetAreas = {
+    1: [],
+    2: [],
+    3: [],
+    4: [],
+  };
+  activeTargetSlot = 1;
   targetPassword = "";
   playerStartPoints = {};
+  playerTargetSlots = {};
   loadedMarkings = [];
   targetUnlockedPlayers = new Set();
 
   emitMapState();
-  io.emit("targetAreaState", { targetArea: [] });
+  io.emit("targetAreaState", { targetArea: [], targetSlot: 1 });
 }
 
 io.on("connection", (socket) => {
@@ -312,7 +359,11 @@ io.on("connection", (socket) => {
       })),
     });
     if (targetUnlockedPlayers.has(playerId)) {
-      io.to(socket.id).emit("targetAreaState", { targetArea });
+      const slot = getValidTargetSlot(playerTargetSlots[playerId] || 1);
+      io.to(socket.id).emit("targetAreaState", {
+        targetArea: getTargetAreaForPlayer(playerId),
+        targetSlot: slot,
+      });
     }
   });
 
@@ -512,7 +563,7 @@ io.on("connection", (socket) => {
     const hasAnyMarking =
       gameArea.length > 0 ||
       Boolean(meetingPoint) ||
-      targetArea.length > 0 ||
+      Object.values(targetAreas).some((area) => area.length > 0) ||
       Object.keys(playerStartPoints).length > 0;
 
     if (!hasAnyMarking) {
@@ -575,12 +626,55 @@ io.on("connection", (socket) => {
     if (callback) callback({ ok: true });
   });
 
+  socket.on("setTargetPassword", (data, callback) => {
+    const password = String(data?.password || "").trim();
+
+    if (!password) {
+      if (callback) callback({ ok: false, reason: "Passwort fehlt" });
+      return;
+    }
+
+    targetPassword = password;
+    emitMapState();
+    emitAnnouncement("Zielbereich-Passwort aktualisiert");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("selectAdminTargetSlot", (data, callback) => {
+    activeTargetSlot = getValidTargetSlot(data?.slot);
+    emitMapState();
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("setPlayerTargetSlot", (data, callback) => {
+    const playerId = data?.playerId;
+    const slot = getValidTargetSlot(data?.slot);
+
+    if (!playerId || !players[playerId]) {
+      if (callback) callback({ ok: false, reason: "Spieler nicht gefunden" });
+      return;
+    }
+
+    playerTargetSlots[playerId] = slot;
+
+    if (targetUnlockedPlayers.has(playerId)) {
+      io.to(players[playerId].socketId).emit("targetAreaState", {
+        targetArea: getTargetAreaForPlayer(playerId),
+        targetSlot: slot,
+      });
+    }
+
+    emitMapState();
+    if (callback) callback({ ok: true });
+  });
+
   socket.on("setTargetArea", (data, callback) => {
     if (!Array.isArray(data?.points)) {
       if (callback) callback({ ok: false, reason: "Zielbereich fehlt" });
       return;
     }
 
+    const slot = getValidTargetSlot(data?.slot || activeTargetSlot);
     const nextPassword = String(data?.password ?? targetPassword).trim();
     if (!nextPassword) {
       if (callback) callback({ ok: false, reason: "Passwort fehlt" });
@@ -588,7 +682,8 @@ io.on("connection", (socket) => {
     }
 
     targetPassword = nextPassword;
-    targetArea = data.points
+    activeTargetSlot = slot;
+    targetAreas[slot] = data.points
       .map((point) => ({
         lat: Number(point?.lat),
         lng: Number(point?.lng),
@@ -598,17 +693,35 @@ io.on("connection", (socket) => {
 
     emitMapState();
     emitTargetAreaToUnlockedPlayers();
-    emitAnnouncement(targetArea.length > 0 ? "Zielbereich aktualisiert" : "Zielbereich vorbereitet");
+    emitAnnouncement(targetAreas[slot].length > 0 ? `Zielbereich ${slot} aktualisiert` : `Zielbereich ${slot} vorbereitet`);
     if (callback) callback({ ok: true });
   });
 
   socket.on("clearTargetArea", (callback) => {
-    targetArea = [];
+    targetAreas = {
+      1: [],
+      2: [],
+      3: [],
+      4: [],
+    };
+    activeTargetSlot = 1;
     targetPassword = "";
+    playerTargetSlots = {};
     targetUnlockedPlayers = new Set();
     emitMapState();
-    io.emit("targetAreaState", { targetArea: [] });
+    io.emit("targetAreaState", { targetArea: [], targetSlot: 1 });
     emitAnnouncement("Zielbereich geloescht");
+    if (callback) callback({ ok: true });
+  });
+
+  socket.on("clearTargetAreaSlot", (data, callback) => {
+    const slot = getValidTargetSlot(data?.slot || activeTargetSlot);
+    targetAreas[slot] = [];
+    activeTargetSlot = slot;
+
+    emitMapState();
+    emitTargetAreaToUnlockedPlayers();
+    emitAnnouncement(`Zielbereich ${slot} geloescht`);
     if (callback) callback({ ok: true });
   });
 
@@ -627,7 +740,12 @@ io.on("connection", (socket) => {
     }
 
     targetUnlockedPlayers.add(playerId);
-    io.to(players[playerId].socketId).emit("targetAreaState", { targetArea });
+    const slot = getValidTargetSlot(playerTargetSlots[playerId] || 1);
+    io.to(players[playerId].socketId).emit("targetAreaState", {
+      targetArea: getTargetAreaForPlayer(playerId),
+      targetSlot: slot,
+    });
+    emitMapState();
     if (callback) callback({ ok: true });
   });
 

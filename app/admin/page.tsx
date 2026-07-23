@@ -45,12 +45,20 @@ type MapState = {
   adminPosition: AdminPosition | null;
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
-  targetArea: MapPoint[];
+  targetAreas: TargetAreas;
+  activeTargetSlot: TargetSlot;
+  playerTargetSlots: Record<string, TargetSlot>;
+  targetUnlockedPlayerIds: string[];
+  targetPassword: string;
   playerStartPoints: Record<string, MapPoint>;
   savedMarkings: SavedMarking[];
   loadedMarkings: SavedMarking[];
   hasTargetPassword: boolean;
 };
+
+type TargetSlot = 1 | 2 | 3 | 4;
+
+type TargetAreas = Record<TargetSlot, MapPoint[]>;
 
 type SavedMarking = {
   id: string;
@@ -63,6 +71,8 @@ type SavedMarking = {
 };
 
 type EditMode = "none" | "meeting" | "area" | "target" | "start";
+
+const targetSlots: TargetSlot[] = [1, 2, 3, 4];
 
 type PrivateMessageLog = {
   id: string;
@@ -106,8 +116,18 @@ export default function AdminPage() {
   const [adminPosition, setAdminPosition] = useState<AdminPosition | null>(null);
   const [gameArea, setGameArea] = useState<MapPoint[]>([]);
   const [meetingPoint, setMeetingPoint] = useState<MapPoint | null>(null);
-  const [targetArea, setTargetArea] = useState<MapPoint[]>([]);
+  const [targetAreas, setTargetAreas] = useState<TargetAreas>({
+    1: [],
+    2: [],
+    3: [],
+    4: [],
+  });
+  const [activeTargetSlot, setActiveTargetSlot] = useState<TargetSlot>(1);
+  const [targetPassword, setTargetPassword] = useState("");
   const [targetPasswordDraft, setTargetPasswordDraft] = useState("");
+  const [playerTargetSlots, setPlayerTargetSlots] = useState<Record<string, TargetSlot>>({});
+  const [targetUnlockedPlayerIds, setTargetUnlockedPlayerIds] = useState<string[]>([]);
+  const [showTargetPanel, setShowTargetPanel] = useState(false);
   const [hasTargetPassword, setHasTargetPassword] = useState(false);
   const [playerStartPoints, setPlayerStartPoints] = useState<Record<string, MapPoint>>({});
   const [savedMarkings, setSavedMarkings] = useState<SavedMarking[]>([]);
@@ -164,7 +184,12 @@ export default function AdminPage() {
       setAdminPosition(data.adminPosition);
       setGameArea(data.gameArea || []);
       setMeetingPoint(data.meetingPoint);
-      setTargetArea(data.targetArea || []);
+      setTargetAreas(data.targetAreas || { 1: [], 2: [], 3: [], 4: [] });
+      setActiveTargetSlot(data.activeTargetSlot || 1);
+      setTargetPassword(data.targetPassword || "");
+      setTargetPasswordDraft(data.targetPassword || "");
+      setPlayerTargetSlots(data.playerTargetSlots || {});
+      setTargetUnlockedPlayerIds(data.targetUnlockedPlayerIds || []);
       setPlayerStartPoints(data.playerStartPoints || {});
       setSavedMarkings(data.savedMarkings || []);
       setLoadedMarkings(data.loadedMarkings || []);
@@ -371,42 +396,13 @@ export default function AdminPage() {
     );
   };
 
-  const beginTargetArea = (keepUnlockedPlayers: boolean) => {
-    const password = prompt("Passwort für den Zielbereich eingeben");
-    const trimmedPassword = password?.trim();
-    if (!trimmedPassword) return;
-
-    setTargetPasswordDraft(trimmedPassword);
-    setTargetArea([]);
-    setEditMode("target");
-
-    if (keepUnlockedPlayers) {
-      socket.timeout(4000).emit(
-        "setTargetArea",
-        {
-          points: [],
-          password: trimmedPassword,
-        },
-        (error: Error | null, response?: ServerResponse) => {
-          showServerError(error, response);
-        }
-      );
-    } else {
-      socket.timeout(4000).emit(
-        "clearTargetArea",
-        (error: Error | null, response?: ServerResponse) => {
-          showServerError(error, response);
-        }
-      );
-    }
-  };
-
   const addTargetAreaPoint = (point: MapPoint) => {
     const nextArea = [...targetArea, point];
     setTargetArea(nextArea);
     socket.timeout(4000).emit(
       "setTargetArea",
       {
+        slot: activeTargetSlot,
         points: nextArea,
         password: targetPasswordDraft,
       },
@@ -422,6 +418,74 @@ export default function AdminPage() {
     setEditMode("none");
     socket.timeout(4000).emit(
       "clearTargetArea",
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const updateTargetPassword = () => {
+    const password = prompt("Neues Passwort für den Zielbereich eingeben", targetPassword);
+    const trimmedPassword = password?.trim();
+    if (!trimmedPassword) return;
+
+    setTargetPassword(trimmedPassword);
+    setTargetPasswordDraft(trimmedPassword);
+    socket.timeout(4000).emit(
+      "setTargetPassword",
+      { password: trimmedPassword },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const selectTargetSlot = (slot: TargetSlot) => {
+    setActiveTargetSlot(slot);
+    setEditMode("none");
+    socket.timeout(4000).emit(
+      "selectAdminTargetSlot",
+      { slot },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const beginTargetAreaSlot = (slot: TargetSlot) => {
+    const password = targetPasswordDraft.trim();
+    if (!password) {
+      alert("Bitte zuerst ein Zielbereich-Passwort setzen.");
+      return;
+    }
+
+    setActiveTargetSlot(slot);
+    setTargetAreas((areas) => ({
+      ...areas,
+      [slot]: [],
+    }));
+    setEditMode("target");
+    socket.timeout(4000).emit(
+      "setTargetArea",
+      {
+        slot,
+        points: [],
+        password,
+      },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
+  const setPlayerTargetSlot = (playerId: string, slot: TargetSlot) => {
+    setPlayerTargetSlots((slots) => ({
+      ...slots,
+      [playerId]: slot,
+    }));
+    socket.timeout(4000).emit(
+      "setPlayerTargetSlot",
+      { playerId, slot },
       (error: Error | null, response?: ServerResponse) => {
         showServerError(error, response);
       }
@@ -544,7 +608,13 @@ export default function AdminPage() {
 
     setGameArea([]);
     setMeetingPoint(null);
-    setTargetArea([]);
+    setTargetAreas({
+      1: [],
+      2: [],
+      3: [],
+      4: [],
+    });
+    setActiveTargetSlot(1);
     setPlayerStartPoints({});
     setLoadedMarkings([]);
     setEditMode("none");
@@ -656,6 +726,14 @@ export default function AdminPage() {
     if (!selectedPlayerId) return null;
     return players[selectedPlayerId] || null;
   }, [players, selectedPlayerId]);
+
+  const targetArea = targetAreas[activeTargetSlot] || [];
+  const setTargetArea = (area: MapPoint[]) => {
+    setTargetAreas((areas) => ({
+      ...areas,
+      [activeTargetSlot]: area,
+    }));
+  };
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -840,15 +918,15 @@ export default function AdminPage() {
               Spielbereich zeichnen
             </button>
             <button
-              onClick={() => beginTargetArea(false)}
+              onClick={() => setShowTargetPanel((isOpen) => !isOpen)}
               className={`rounded px-3 py-2 text-sm font-semibold text-white ${
-                editMode === "target" ? "bg-yellow-600" : "bg-yellow-700"
+                showTargetPanel ? "bg-yellow-600" : "bg-yellow-700"
               }`}
             >
               Zielbereich zeichnen
             </button>
             <button
-              onClick={() => beginTargetArea(true)}
+              onClick={() => setShowTargetPanel(true)}
               className="rounded bg-yellow-600 px-3 py-2 text-sm font-semibold text-white"
             >
               Zielbereich ändern
@@ -873,6 +951,56 @@ export default function AdminPage() {
             </button>
           </div>
         </div>
+
+        {showTargetPanel && (
+          <div className="mb-3 rounded-xl border border-yellow-200 bg-yellow-50 p-4">
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h3 className="mb-2 text-lg font-bold text-black">Zielbereich</h3>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={targetPasswordDraft}
+                    readOnly
+                    placeholder="Noch kein Passwort"
+                    className="w-56 rounded border border-yellow-300 bg-white px-3 py-2 text-black"
+                  />
+                  <button
+                    onClick={updateTargetPassword}
+                    className="flex h-10 w-10 items-center justify-center rounded bg-yellow-700 font-bold text-white"
+                    title="Passwort ändern"
+                  >
+                    ✎
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-end gap-3">
+                {targetSlots.map((slot) => (
+                  <div key={slot} className="grid justify-items-center gap-1">
+                    <button
+                      onClick={() => beginTargetAreaSlot(slot)}
+                      className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-700 text-sm font-bold text-white"
+                      title={`Zielbereich ${slot} ändern`}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => selectTargetSlot(slot)}
+                      className={`flex h-11 w-11 items-center justify-center rounded-full border-2 text-base font-bold ${
+                        activeTargetSlot === slot
+                          ? "border-yellow-900 bg-yellow-500 text-black"
+                          : "border-yellow-400 bg-white text-yellow-900"
+                      }`}
+                    >
+                      {slot}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mb-3">
           <button
@@ -1140,6 +1268,28 @@ export default function AdminPage() {
                   : "keins"}
               </div>
             </div>
+
+            {targetUnlockedPlayerIds.includes(player.playerId) && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">Zielbereich:</span>
+                {targetSlots.map((slot) => (
+                  <button
+                    key={slot}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPlayerTargetSlot(player.playerId, slot);
+                    }}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-sm font-bold ${
+                      (playerTargetSlots[player.playerId] || 1) === slot
+                        ? "border-yellow-900 bg-yellow-500 text-black"
+                        : "border-yellow-300 bg-white text-yellow-900"
+                    }`}
+                  >
+                    {slot}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <button
