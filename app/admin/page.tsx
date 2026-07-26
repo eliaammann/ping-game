@@ -46,6 +46,7 @@ type MapState = {
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
   targetAreas: TargetAreas;
+  centralBase: MapPoint | null;
   activeTargetSlot: TargetSlot;
   playerTargetSlots: Record<string, TargetSlot>;
   targetUnlockedPlayerIds: string[];
@@ -70,7 +71,7 @@ type SavedMarking = {
   playerStartPoints: Record<string, MapPoint>;
 };
 
-type EditMode = "none" | "meeting" | "area" | "target" | "start";
+type EditMode = "none" | "meeting" | "area" | "target" | "centralBase" | "start";
 
 const targetSlots: TargetSlot[] = [1, 2, 3, 4];
 
@@ -122,6 +123,7 @@ export default function AdminPage() {
     3: [],
     4: [],
   });
+  const [centralBase, setCentralBase] = useState<MapPoint | null>(null);
   const [activeTargetSlot, setActiveTargetSlot] = useState<TargetSlot>(1);
   const [targetPassword, setTargetPassword] = useState("");
   const [targetPasswordDraft, setTargetPasswordDraft] = useState("");
@@ -185,6 +187,7 @@ export default function AdminPage() {
       setGameArea(data.gameArea || []);
       setMeetingPoint(data.meetingPoint);
       setTargetAreas(data.targetAreas || { 1: [], 2: [], 3: [], 4: [] });
+      setCentralBase(data.centralBase || null);
       setActiveTargetSlot(data.activeTargetSlot || 1);
       setTargetPassword(data.targetPassword || "");
       setTargetPasswordDraft(data.targetPassword || "");
@@ -412,8 +415,21 @@ export default function AdminPage() {
     );
   };
 
+  const setCentralBaseOnMap = (point: MapPoint) => {
+    setCentralBase(point);
+    setEditMode("none");
+    socket.timeout(4000).emit(
+      "setCentralBase",
+      { point },
+      (error: Error | null, response?: ServerResponse) => {
+        showServerError(error, response);
+      }
+    );
+  };
+
   const clearTargetArea = () => {
     setTargetArea([]);
+    setCentralBase(null);
     setTargetPasswordDraft("");
     setEditMode("none");
     socket.timeout(4000).emit(
@@ -614,6 +630,7 @@ export default function AdminPage() {
       3: [],
       4: [],
     });
+    setCentralBase(null);
     setActiveTargetSlot(1);
     setPlayerStartPoints({});
     setLoadedMarkings([]);
@@ -892,6 +909,7 @@ export default function AdminPage() {
               {editMode === "meeting" && "Klicke auf die Karte, um den Treffpunkt zu setzen."}
               {editMode === "area" && "Klicke mehrere Punkte auf der Karte, um den Spielbereich zu zeichnen."}
               {editMode === "target" && "Klicke mehrere Punkte auf der Karte, um den Zielbereich zu zeichnen."}
+              {editMode === "centralBase" && "Klicke auf die Karte, um die Central Base zu setzen."}
               {editMode === "start" && "Klicke auf die Karte, um den Startpunkt für den ausgewählten Spieler zu setzen."}
               {editMode === "none" &&
                 `Spielbereich, Treffpunkt und Adminposition werden hier angezeigt. Zielpasswort: ${
@@ -957,7 +975,7 @@ export default function AdminPage() {
             <div className="mb-3 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h3 className="mb-2 text-lg font-bold text-black">Zielbereich</h3>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="text"
                     value={targetPasswordDraft}
@@ -972,6 +990,18 @@ export default function AdminPage() {
                   >
                     ✎
                   </button>
+                  <button
+                    onClick={() => setEditMode("centralBase")}
+                    className={`rounded px-3 py-2 text-sm font-semibold text-white ${
+                      editMode === "centralBase" ? "bg-yellow-800" : "bg-yellow-700"
+                    }`}
+                    title="Central Base setzen oder aendern"
+                  >
+                    Central Base setzen
+                  </button>
+                </div>
+                <div className="mt-2 text-sm text-yellow-900">
+                  {centralBase ? "Central Base ist gesetzt." : "Noch keine Central Base gesetzt."}
                 </div>
               </div>
 
@@ -1061,12 +1091,14 @@ export default function AdminPage() {
             gameArea={gameArea}
             meetingPoint={meetingPoint}
             targetArea={targetArea}
+            centralBase={centralBase}
             playerStartPoints={playerStartPoints}
             loadedMarkings={loadedMarkings}
             editMode={editMode}
             onMeetingPoint={setMeetingPointOnMap}
             onAreaPoint={addAreaPoint}
             onTargetAreaPoint={addTargetAreaPoint}
+            onCentralBasePoint={setCentralBaseOnMap}
             onStartPoint={setStartPointOnMap}
           />
         </div>

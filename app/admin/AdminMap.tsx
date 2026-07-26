@@ -50,7 +50,7 @@ type AdminPosition = MapPoint & {
   updatedAt: number;
 };
 
-type EditMode = "none" | "meeting" | "area" | "target" | "start";
+type EditMode = "none" | "meeting" | "area" | "target" | "centralBase" | "start";
 
 function InitialFitToPlayers({ players }: { players: Record<string, Player> }) {
   const map = useMap();
@@ -90,12 +90,14 @@ function MapClickHandler({
   onMeetingPoint,
   onAreaPoint,
   onTargetAreaPoint,
+  onCentralBasePoint,
   onStartPoint,
 }: {
   editMode: EditMode;
   onMeetingPoint: (point: MapPoint) => void;
   onAreaPoint: (point: MapPoint) => void;
   onTargetAreaPoint: (point: MapPoint) => void;
+  onCentralBasePoint: (point: MapPoint) => void;
   onStartPoint: (point: MapPoint) => void;
 }) {
   useMapEvents({
@@ -117,6 +119,10 @@ function MapClickHandler({
         onTargetAreaPoint(point);
       }
 
+      if (editMode === "centralBase") {
+        onCentralBasePoint(point);
+      }
+
       if (editMode === "start") {
         onStartPoint(point);
       }
@@ -132,12 +138,14 @@ export default function AdminMap({
   gameArea,
   meetingPoint,
   targetArea,
+  centralBase,
   playerStartPoints,
   loadedMarkings,
   editMode,
   onMeetingPoint,
   onAreaPoint,
   onTargetAreaPoint,
+  onCentralBasePoint,
   onStartPoint,
 }: {
   players: Record<string, Player>;
@@ -145,12 +153,14 @@ export default function AdminMap({
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
   targetArea: MapPoint[];
+  centralBase: MapPoint | null;
   playerStartPoints: Record<string, MapPoint>;
   loadedMarkings: SavedMarking[];
   editMode: EditMode;
   onMeetingPoint: (point: MapPoint) => void;
   onAreaPoint: (point: MapPoint) => void;
   onTargetAreaPoint: (point: MapPoint) => void;
+  onCentralBasePoint: (point: MapPoint) => void;
   onStartPoint: (point: MapPoint) => void;
 }) {
   const getRoleColor = (role: Player["role"]) => {
@@ -176,6 +186,7 @@ export default function AdminMap({
         onMeetingPoint={onMeetingPoint}
         onAreaPoint={onAreaPoint}
         onTargetAreaPoint={onTargetAreaPoint}
+        onCentralBasePoint={onCentralBasePoint}
         onStartPoint={onStartPoint}
       />
 
@@ -252,6 +263,29 @@ export default function AdminMap({
             </Tooltip>
           </Marker>
         ))}
+
+      {centralBase && (
+        <Marker
+          position={[centralBase.lat, centralBase.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:28px;
+              height:28px;
+              background:#111827;
+              border-radius:50%;
+              border:4px solid #facc15;
+              box-shadow:0 2px 8px rgba(0,0,0,0.4);
+            "></div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          })}
+        >
+          <Tooltip permanent direction="top" offset={[0, -16]}>
+            Central Base
+          </Tooltip>
+        </Marker>
+      )}
 
       {loadedMarkings.map((marking) => (
         <Fragment key={marking.id}>

@@ -21,6 +21,7 @@ let targetAreas = {
   3: [],
   4: [],
 };
+let centralBase = null;
 let activeTargetSlot = 1;
 let targetPassword = "";
 let playerStartPoints = {};
@@ -120,6 +121,7 @@ function emitMapState() {
       gameArea,
       meetingPoint,
       targetAreas,
+      centralBase,
       activeTargetSlot,
       playerTargetSlots,
       targetUnlockedPlayerIds: getTargetUnlockedPlayerIds(),
@@ -147,6 +149,7 @@ function emitAdminMapState(socket) {
     gameArea,
     meetingPoint,
     targetAreas,
+    centralBase,
     activeTargetSlot,
     playerTargetSlots,
     targetUnlockedPlayerIds: getTargetUnlockedPlayerIds(),
@@ -165,6 +168,7 @@ function emitTargetAreaToUnlockedPlayers() {
       io.to(player.socketId).emit("targetAreaState", {
         targetArea: getTargetAreaForPlayer(player.playerId),
         targetSlot: slot,
+        centralBase,
       });
     }
   });
@@ -213,6 +217,7 @@ function resetGameState() {
     3: [],
     4: [],
   };
+  centralBase = null;
   activeTargetSlot = 1;
   targetPassword = "";
   playerStartPoints = {};
@@ -236,7 +241,7 @@ function resetGameState() {
   emitPingState();
   emitCatchState();
   emitMapState();
-  io.emit("targetAreaState", { targetArea: [], targetSlot: 1 });
+  io.emit("targetAreaState", { targetArea: [], targetSlot: 1, centralBase: null });
 }
 
 function clonePoints(points) {
@@ -284,6 +289,7 @@ function clearActiveMapMarkings() {
     3: [],
     4: [],
   };
+  centralBase = null;
   activeTargetSlot = 1;
   targetPassword = "";
   playerStartPoints = {};
@@ -292,7 +298,7 @@ function clearActiveMapMarkings() {
   targetUnlockedPlayers = new Set();
 
   emitMapState();
-  io.emit("targetAreaState", { targetArea: [], targetSlot: 1 });
+  io.emit("targetAreaState", { targetArea: [], targetSlot: 1, centralBase: null });
 }
 
 io.on("connection", (socket) => {
@@ -363,6 +369,7 @@ io.on("connection", (socket) => {
       io.to(socket.id).emit("targetAreaState", {
         targetArea: getTargetAreaForPlayer(playerId),
         targetSlot: slot,
+        centralBase,
       });
     }
   });
@@ -661,6 +668,7 @@ io.on("connection", (socket) => {
       io.to(players[playerId].socketId).emit("targetAreaState", {
         targetArea: getTargetAreaForPlayer(playerId),
         targetSlot: slot,
+        centralBase,
       });
     }
 
@@ -697,6 +705,27 @@ io.on("connection", (socket) => {
     if (callback) callback({ ok: true });
   });
 
+  socket.on("setCentralBase", (data, callback) => {
+    const lat = Number(data?.point?.lat ?? data?.lat);
+    const lng = Number(data?.point?.lng ?? data?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      if (callback) callback({ ok: false, reason: "Central Base fehlt" });
+      return;
+    }
+
+    centralBase = {
+      lat,
+      lng,
+      updatedAt: Date.now(),
+    };
+
+    emitMapState();
+    emitTargetAreaToUnlockedPlayers();
+    emitAnnouncement("Central Base gesetzt");
+    if (callback) callback({ ok: true });
+  });
+
   socket.on("clearTargetArea", (callback) => {
     targetAreas = {
       1: [],
@@ -704,12 +733,13 @@ io.on("connection", (socket) => {
       3: [],
       4: [],
     };
+    centralBase = null;
     activeTargetSlot = 1;
     targetPassword = "";
     playerTargetSlots = {};
     targetUnlockedPlayers = new Set();
     emitMapState();
-    io.emit("targetAreaState", { targetArea: [], targetSlot: 1 });
+    io.emit("targetAreaState", { targetArea: [], targetSlot: 1, centralBase: null });
     emitAnnouncement("Zielbereich geloescht");
     if (callback) callback({ ok: true });
   });
@@ -744,6 +774,7 @@ io.on("connection", (socket) => {
     io.to(players[playerId].socketId).emit("targetAreaState", {
       targetArea: getTargetAreaForPlayer(playerId),
       targetSlot: slot,
+      centralBase,
     });
     emitMapState();
     if (callback) callback({ ok: true });

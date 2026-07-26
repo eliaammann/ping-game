@@ -88,6 +88,7 @@ export default function Map({
   gameArea,
   meetingPoint,
   targetArea,
+  centralBase,
   startPoint,
   targetFocusKey,
   loadedMarkings,
@@ -100,12 +101,14 @@ export default function Map({
   gameArea: MapPoint[];
   meetingPoint: MapPoint | null;
   targetArea: MapPoint[];
+  centralBase: MapPoint | null;
   startPoint: MapPoint | null;
   targetFocusKey: number;
   loadedMarkings: LoadedMarking[];
 }) {
   const ownColor =
     ownRole === "agent" ? "#2563eb" : ownRole === "hunter" ? "#dc2626" : "#4b5563";
+  const targetFocusPoints = centralBase ? [...targetArea, centralBase] : targetArea;
   const directionIcon = L.divIcon({
     className: "",
     html: `<div style="
@@ -145,19 +148,44 @@ export default function Map({
         />
       )}
 
-      {targetArea.length >= 3 && (
+      {(targetArea.length >= 3 || centralBase) && (
         <>
-          <Polygon
-            positions={targetArea.map((point) => [point.lat, point.lng])}
-            pathOptions={{
-              color: "#ca8a04",
-              fillColor: "#facc15",
-              fillOpacity: 0.22,
-              weight: 3,
-            }}
-          />
-          <FitToArea points={targetArea} focusKey={targetFocusKey} />
+          {targetArea.length >= 3 && (
+            <Polygon
+              positions={targetArea.map((point) => [point.lat, point.lng])}
+              pathOptions={{
+                color: "#ca8a04",
+                fillColor: "#facc15",
+                fillOpacity: 0.22,
+                weight: 3,
+              }}
+            />
+          )}
+          <FitToArea points={targetFocusPoints} focusKey={targetFocusKey} />
         </>
+      )}
+
+      {centralBase && (
+        <Marker
+          position={[centralBase.lat, centralBase.lng]}
+          icon={L.divIcon({
+            className: "",
+            html: `<div style="
+              width:28px;
+              height:28px;
+              background:#111827;
+              border-radius:50%;
+              border:4px solid #facc15;
+              box-shadow:0 2px 8px rgba(0,0,0,0.4);
+            "></div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+          })}
+        >
+          <Tooltip permanent direction="top" offset={[0, -16]}>
+            Central Base
+          </Tooltip>
+        </Marker>
       )}
 
       {loadedMarkings.map((marking) => (

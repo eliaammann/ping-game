@@ -120,6 +120,7 @@ export default function Home() {
   const [startPoint, setStartPoint] = useState<MapPoint | null>(null);
   const [loadedMarkings, setLoadedMarkings] = useState<LoadedMarking[]>([]);
   const [targetArea, setTargetArea] = useState<MapPoint[]>([]);
+  const [centralBase, setCentralBase] = useState<MapPoint | null>(null);
   const [targetPasswordInput, setTargetPasswordInput] = useState("");
   const [showTargetUnlock, setShowTargetUnlock] = useState(false);
   const [targetFocusKey, setTargetFocusKey] = useState(0);
@@ -235,9 +236,11 @@ export default function Home() {
       setLoadedMarkings(data.loadedMarkings || []);
     });
 
-    socket.on("targetAreaState", (data: { targetArea: MapPoint[] }) => {
-      setTargetArea(data.targetArea || []);
-      if ((data.targetArea || []).length > 0) {
+    socket.on("targetAreaState", (data: { targetArea: MapPoint[]; centralBase?: MapPoint | null }) => {
+      const nextTargetArea = data.targetArea || [];
+      setTargetArea(nextTargetArea);
+      setCentralBase(data.centralBase || null);
+      if (nextTargetArea.length > 0 || data.centralBase) {
         setTargetFocusKey((key) => key + 1);
         setShowTargetUnlock(false);
       }
@@ -831,6 +834,7 @@ export default function Home() {
           gameArea={gameArea}
           meetingPoint={meetingPoint}
           targetArea={targetArea}
+          centralBase={centralBase}
           startPoint={startPoint}
           targetFocusKey={targetFocusKey}
           loadedMarkings={loadedMarkings}
