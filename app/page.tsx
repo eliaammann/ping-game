@@ -41,6 +41,11 @@ type LocationStatus =
   | "error"
   | "stale";
 
+type PrivacyDecision = {
+  cookies: boolean;
+  location: boolean;
+};
+
 type MapPoint = {
   lat: number;
   lng: number;
@@ -69,6 +74,20 @@ type PrivateMessage = {
 
 function generatePlayerId() {
   return "player-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function getCookie(name: string) {
+  if (typeof document === "undefined") return null;
+
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function persistPrivacyDecision(decision: PrivacyDecision) {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.setItem("pinggamePrivacyConsent", JSON.stringify(decision));
+  document.cookie = `pinggame_cookie_consent=${decision.cookies ? "accepted" : "denied"}; path=/; max-age=31536000; SameSite=Lax`;
 }
 
 export default function Home() {
@@ -108,6 +127,8 @@ export default function Home() {
   const [privateReply, setPrivateReply] = useState("");
   const [adminMessageInput, setAdminMessageInput] = useState("");
   const [kicked, setKicked] = useState(false);
+  const [privacyDecision, setPrivacyDecision] = useState<PrivacyDecision | null>(null);
+  const [showPrivacyPrompt, setShowPrivacyPrompt] = useState(false);
 
   useEffect(() => {
     const savedPlayerId = localStorage.getItem("playerId");
@@ -125,6 +146,34 @@ export default function Home() {
       setTempName(savedPlayerName);
       setJoined(true);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const savedChoice = window.localStorage.getItem("pinggamePrivacyConsent");
+    if (savedChoice) {
+      try {
+        const parsedChoice = JSON.parse(savedChoice) as PrivacyDecision;
+        setPrivacyDecision(parsedChoice);
+        return;
+      } catch {
+        window.localStorage.removeItem("pinggamePrivacyConsent");
+      }
+    }
+
+    const cookieValue = getCookie("pinggame_cookie_consent");
+    if (cookieValue === "accepted" || cookieValue === "denied") {
+      const fallbackDecision = {
+        cookies: cookieValue === "accepted",
+        location: false,
+      };
+      setPrivacyDecision(fallbackDecision);
+      persistPrivacyDecision(fallbackDecision);
+      return;
+    }
+
+    setShowPrivacyPrompt(true);
   }, []);
 
   useEffect(() => {
@@ -273,6 +322,22 @@ export default function Home() {
   useEffect(() => {
     if (!joined || !playerId) return;
 
+    if (!privacyDecision) {
+      setLocationStatus("checking");
+      setLocationMessage("Bitte erlauben Sie zuerst Standort und Cookies.");
+      return;
+    }
+
+    if (!privacyDecision.location) {
+      setLocationStatus("denied");
+      setLocationMessage("Standort ist deaktiviert. Bitte einmal im Browser erlauben.");
+      socket.emit("locationStatus", {
+        playerId,
+        locationStatus: "denied",
+      });
+      return;
+    }
+
     if (!navigator.geolocation) {
       setLocationStatus("unsupported");
       setLocationMessage("Geolocation wird auf diesem Gerät nicht unterstützt.");
@@ -380,7 +445,7 @@ export default function Home() {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [joined, playerId]);
+  }, [joined, playerId, privacyDecision]);
 
   const myRole = useMemo(() => {
     if (!playerId || !players[playerId]) return "unassigned";
@@ -426,6 +491,28 @@ export default function Home() {
         return "bg-blue-600";
       default:
         return "bg-gray-600";
+    }
+  };
+
+  const handlePrivacyChoice = (allowLocation: boolean, allowCookies: boolean) => {
+    const nextDecision: PrivacyDecision = {
+      cookies: allowCookies,
+      location: allowLocation,
+    };
+
+    persistPrivacyDecision(nextDecision);
+    setPrivacyDecision(nextDecision);
+    setShowPrivacyPrompt(false);
+
+    if (!allowLocation) {
+      setLocationStatus("denied");
+      setLocationMessage("Standort ist deaktiviert. Du kannst es später wieder erlauben.");
+      if (playerId) {
+        socket.emit("locationStatus", {
+          playerId,
+          locationStatus: "denied",
+        });
+      }
     }
   };
 
@@ -519,6 +606,38 @@ export default function Home() {
   if (!joined) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
+        {showPrivacyPrompt && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+              <h2 className="text-xl font-bold text-black">Datenschutz & Standort</h2>
+              <p className="mt-2 text-sm text-gray-700">
+                Für dieses Spiel darf der Browser einmal Standort und Cookies verwenden.
+                Ohne Erlaubnis bleiben beide Funktionen deaktiviert.
+              </p>
+
+              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-800">
+                <p>• Standort: für die Positionsverfolgung</p>
+                <p>• Cookies: für die einmalige Zustimmung auf diesem Gerät</p>
+              </div>
+
+              <div className="mt-5 flex gap-2">
+                <button
+                  onClick={() => handlePrivacyChoice(true, true)}
+                  className="flex-1 rounded-lg bg-green-600 px-4 py-3 font-semibold text-white"
+                >
+                  Erlauben
+                </button>
+                <button
+                  onClick={() => handlePrivacyChoice(false, false)}
+                  className="flex-1 rounded-lg bg-gray-700 px-4 py-3 font-semibold text-white"
+                >
+                  Deaktiviert lassen
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
           <h1 className="mb-4 text-2xl font-bold text-black">Spiel beitreten</h1>
           {kicked && (
