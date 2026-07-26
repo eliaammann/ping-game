@@ -165,12 +165,7 @@ export default function Home() {
 
     const cookieValue = getCookie("pinggame_cookie_consent");
     if (cookieValue === "accepted" || cookieValue === "denied") {
-      const fallbackDecision = {
-        cookies: cookieValue === "accepted",
-        location: false,
-      };
-      setPrivacyDecision(fallbackDecision);
-      persistPrivacyDecision(fallbackDecision);
+      setShowPrivacyPrompt(true);
       return;
     }
 
@@ -606,6 +601,38 @@ export default function Home() {
     );
   };
 
+  const privacyPrompt = showPrivacyPrompt && (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <h2 className="text-xl font-bold text-black">Datenschutz & Standort</h2>
+        <p className="mt-2 text-sm text-gray-700">
+          Fuer dieses Spiel darf der Browser einmal Standort und Cookies verwenden.
+          Ohne Erlaubnis bleiben beide Funktionen deaktiviert.
+        </p>
+
+        <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-800">
+          <p>Standort: fuer die Positionsverfolgung</p>
+          <p>Cookies: fuer die einmalige Zustimmung auf diesem Geraet</p>
+        </div>
+
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={() => handlePrivacyChoice(true, true)}
+            className="flex-1 rounded-lg bg-green-600 px-4 py-3 font-semibold text-white"
+          >
+            Erlauben
+          </button>
+          <button
+            onClick={() => handlePrivacyChoice(false, false)}
+            className="flex-1 rounded-lg bg-gray-700 px-4 py-3 font-semibold text-white"
+          >
+            Deaktiviert lassen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (!joined) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
@@ -673,6 +700,8 @@ export default function Home() {
 
   return (
     <div className="relative flex h-screen flex-col">
+      {privacyPrompt}
+
       {showPingFlash && (
         <div className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center bg-white/20">
           <div className="rounded-2xl bg-black/75 px-8 py-4 text-3xl font-bold text-white shadow-2xl">
@@ -781,8 +810,16 @@ export default function Home() {
         {isPingRunning ? `Nächster Ping in: ${formatTime(seconds)}` : "Ping-Countdown angehalten"}
       </div>
 
-      <div className={`${getLocationBarColor()} p-2 text-center text-sm text-white`}>
-        {locationMessage}
+      <div className={`${getLocationBarColor()} flex flex-wrap items-center justify-center gap-2 p-2 text-center text-sm text-white`}>
+        <span>{locationMessage}</span>
+        {locationStatus === "denied" && (
+          <button
+            onClick={() => setShowPrivacyPrompt(true)}
+            className="rounded bg-white/20 px-3 py-1 text-xs font-semibold text-white"
+          >
+            Standort erlauben
+          </button>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-3 bg-white px-4 py-3 shadow-sm">
